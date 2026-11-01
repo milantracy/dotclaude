@@ -1,0 +1,54 @@
+#!/bin/sh
+# Records and checks which working-tree state self-review approved.
+#
+#   review-stamp tree          Print the tree hash of the working tree
+#                              (tracked + untracked, honoring .gitignore).
+#   review-stamp write [base]  Record the current tree as reviewed.
+#   review-stamp show          Print the recorded stamp.
+#   review-stamp check         Exit 0 if the working tree matches the stamp,
+#                              1 if it differs (prints the stamped tree),
+#                              2 if there is no stamp.
+#
+# The stamp is per worktree, stored in $(git rev-parse --git-path claude-review-stamp).
+set -eu
+
+tree() {
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+	idx=$(git rev-parse --git-path index)
+	if [ -f "$idx" ]; then cp "$idx" "$tmp"; else rm -f "$tmp"; fi
+	GIT_INDEX_FILE=$tmp git add -A
+	GIT_INDEX_FILE=$tmp git write-tree
+}
+
+stamp=$(git rev-parse --git-path claude-review-stamp)
+
+case "${1:-}" in
+tree)
+	tree
+	;;
+write)
+	t=$(tree)
+	printf 'tree=%s\nbase=%s\nhead=%s\ndate=%s\n' \
+		"$t" "${2:-}" "$(git rev-parse HEAD)" "$(date -Iseconds)" >"$stamp"
+	echo "$t"
+	;;
+show)
+	[ -f "$stamp" ] && cat "$stamp" || { echo "no stamp" >&2; exit 2; }
+	;;
+check)
+	[ -f "$stamp" ] || { echo "no stamp" >&2; exit 2; }
+	want=$(sed -n 's/^tree=//p' "$stamp")
+	have=$(tree)
+	if [ "$want" = "$have" ]; then
+		echo "match $have"
+	else
+		echo "$want"
+		exit 1
+	fi
+	;;
+*)
+	sed -n '2,12p' "$0" >&2
+	exit 64
+	;;
+esac
