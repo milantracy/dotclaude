@@ -34,7 +34,9 @@ asks the user to decide. At the end, the skill writes a review stamp.
 This skill prepares a reviewed change and commits it. First, it compares the
 working tree with the review stamp. If the code changed after the review, it
 starts a review of the new changes only. Then it runs the format, lint, build,
-and test steps. It writes the commit message and adds the trailers from the
+and test steps. If the change touches a performance-sensitive path, it looks for
+a benchmark report for the same code. If no such report exists, it asks the user
+what to do. It does not start a benchmark without permission. It writes the commit message and adds the trailers from the
 overlay. It makes sure that each commit has a sign-off. It does not push. The
 skill runs only when the user types `/ship`.
 
@@ -46,6 +48,14 @@ examines each finding against the code and removes the incorrect findings. It
 writes a report with a verdict and a draft review comment for each finding. If an earlier
 report exists, it gives the status of each earlier problem. It posts comments
 only when the user tells it to post.
+
+### `~/.claude/skills/benchmark/SKILL.md`
+
+This skill measures the performance effect of our change. It builds the base
+and the change, and runs the benchmarks in an alternating order. It stops when
+the result is statistically sound. It examines the numbers for usual errors and
+writes a report for the PR description. It does not change the system
+configuration. It gives the commands to the user instead.
 
 ### `bin/review-stamp`
 
@@ -65,6 +75,12 @@ checks that are specific to the project.
 This file contains the ship rules for one project. The `ship` skill reads it.
 It lists the check commands, the method to find the tests, and the commit
 format. It also lists the trailers that a commit must have.
+
+### `projects/<name>/benchmark.md`
+
+This file contains the benchmark rules for one project. The `benchmark` skill
+reads it. It gives the statistics tool, the stop rule, the benchmark targets,
+and the commands to build and run the benchmarks.
 
 ### `projects/gvisor/`
 

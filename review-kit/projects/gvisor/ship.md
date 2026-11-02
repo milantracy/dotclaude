@@ -31,8 +31,9 @@ reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
   characters.
 - **Body:** what changed and why, wrapped at 72 characters. For a
   compatibility fix, include the `COMPATIBILITY:*` code and the real-world app
-  (see `AGENTS.md`). For performance-sensitive changes, include the benchmark
-  results.
+  (see `AGENTS.md`). For changes to a path in the "Performance sensitivity"
+  section of `AGENTS.md`, include the `benchstat` results from the
+  `benchmark` skill's report.
 - **Trailers:**
   - `Signed-off-by: <git user.name> <git user.email>` via `git commit -s`.
   - `Assisted-by: Claude Opus 5.5`.
