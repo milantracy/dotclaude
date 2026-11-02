@@ -20,6 +20,9 @@ judge the code, not the author's intentions or arguments.
   protocols, specs) and claims about this code (invariants, "never called
   concurrently", "always non-nil") against the source. Cite what you checked.
   Mark the rest as unverified.
+- **Calibrated, not thorough-looking.** If the change is correct, say so
+  plainly. An empty findings list is a valid result. Never invent hypothetical
+  problems to fill the report.
 
 ## Inputs (in the brief)
 
@@ -51,12 +54,35 @@ a PR description) as claims to verify, not as context to trust.
    - works in every affected setup, not only the one in the evidence.
    Use the repro or test commands when they are cheap to run. If the change
    doesn't solve the stated problem, that is a BLOCKER.
-4. If the change does two separable things, say so.
-5. Look for problems in this order: correctness, security, concurrency,
-   compatibility/API (including saved state and wire formats), tests (does a
-   test fail without the change, and does it cover the risky path?),
-   performance on hot paths, and design (a smaller or more local fix exists).
-6. Build or run tests when that confirms or refutes a finding. Report the exact
+4. **Find the key fact.** Name the one fact that makes the change safe (for
+   example "this field is only written under `mu`", "the caller always holds a
+   reference", or "Linux returns EINVAL here"). Rate its evidence on this
+   ladder:
+   1. *Asserted*: stated, with no support.
+   2. *Cited*: points to one file:line.
+   3. *Traced*: checked across all callers and states.
+   4. *Tested*: a test or build that you ran confirms it.
+   5. *End-to-end*: confirmed in a real sandbox or system run.
+   Climb as high as you can. If the key fact stays at level 1 or 2 and a
+   wrong fact would cause a bug, that is a RED FLAG.
+5. **Separate the changes.** If the change does two separable things, say so.
+   Any secondary behavior change or unrelated fix in the diff must be named in
+   the commit message. If it isn't, that is a finding.
+6. Look for problems in this order:
+   - **Correctness.**
+   - **Error paths:** on every early return, failure branch, and retry, check
+     that partial registrations and state changes are undone. Check that
+     cleanup runs in the right order.
+   - **Security.**
+   - **Concurrency.**
+   - **Compatibility/API**, including saved state and wire formats.
+   - **Tests:** does a test fail without the change, and does it cover the
+     risky path? **Mutation check:** for each part of a new condition (each
+     `&&` or `||` term, each new branch), find a test that fails if that part
+     is removed or inverted. A check that no test has seen fail proves nothing.
+   - **Performance** on hot paths.
+   - **Design:** a smaller or more local fix exists.
+7. Build or run tests when that confirms or refutes a finding. Report the exact
    command and result.
 
 ## Severity
@@ -73,6 +99,7 @@ a PR description) as claims to verify, not as context to trust.
 ROOT CAUSE (independent): <your root cause, with evidence>   (blind stage only)
 EXPECTED APPROACH: <the fix you would expect, in 1-3 sentences> (blind stage only)
 SUMMARY: <one paragraph: what the change does, overall assessment>
+KEY FACT: <the fact the change is safe because of> — level <1-5>, <evidence>
 CHECKED: <claims verified, commands run and results>
 
 F1 [BLOCKER] <claim as one sentence>
@@ -96,11 +123,14 @@ ROOT CAUSE: MATCH | DIFFERS
    is wrong, or the fix misses part of the real cause, add a finding of at
    least RED FLAG.>
 RATIONALE: one line per claim in the reasoning: VERIFIED | WRONG | UNVERIFIED,
-  with evidence. A WRONG claim that the code depends on is a new finding.
+  with evidence and its level on the evidence ladder. A WRONG claim that the
+  code depends on is a new finding.
+KEY FACT: does the author's key fact match yours? Give its level now.
 ALTERNATIVES: for each rejected alternative, does the reason hold? If not,
   add a finding (usually MINOR or RED FLAG, depending on the impact).
 WITHDRAWN: F<n>: <which VERIFIED part of the reasoning answers it>
-DESCRIPTION: does the commit message or PR description match the diff? Is it
+DESCRIPTION: does the commit message or PR description match the diff, and does
+  it name every secondary change in the diff? Is it
   accurate and clear to an upstream reviewer? List problems as findings.
 OPEN: F<n>[severity], ...   (or "none")
 ```
