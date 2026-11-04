@@ -86,6 +86,10 @@ system changes.
   if this session has one. Update it for any later changes. Otherwise draft it
   from the final diff and the change's intent. Follow the overlay's format
   rules. Show it to the user before committing.
+- **No issue references:** don't put issue or PR IDs in the commit message
+  (no `#123`, `Fixes #123`, `Updates #123`, `Closes ...`, or issue URLs), even
+  if the project's guidelines suggest it. The user tags the issue in the PR
+  body. If the self-review draft has one, drop it from the commit message.
 - **Trailers:** use the overlay's trailers. Without an overlay, use
   `git commit -s` plus the default attribution trailer from the session
   instructions. Add trailers with `--trailer "<Key>: <value>"`; don't
@@ -101,6 +105,8 @@ system changes.
   `git log --format='%H%n%(trailers:key=Signed-off-by,valueonly)' base..HEAD`.
 - The required trailers are present, and forbidden ones (per the overlay) are
   absent.
+- The commit message has no issue references (`#<n>`, `Fixes`/`Updates`/
+  `Closes`, issue URLs).
 
 ## 7. Report
 

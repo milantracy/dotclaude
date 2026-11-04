@@ -86,7 +86,9 @@ Claims the code relies on: <invariants, ordering, "never concurrent", Linux
           behavior, etc.>
 Alternatives rejected: <alternative>: <reason>   (one per line)
 Draft commit message / PR description:
-<full text. If none exists yet, draft it now; /ship reuses it.>
+<full text. If none exists yet, draft it now; /ship reuses it. Keep issue
+IDs (`#123`, `Fixes #123`, `Updates #123`) out of the commit message; the user
+tags the issue in the PR body.>
 ```
 
 Don't hold back weak points. A claim you leave out can't be verified, and the

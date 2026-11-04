@@ -34,6 +34,9 @@ reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
   (see `AGENTS.md`). For changes to a path in the "Performance sensitivity"
   section of `AGENTS.md`, include the `benchstat` results from the
   `benchmark` skill's report.
+- **No issue references** (`Fixes #123`, `Updates #123`, issue URLs) in the
+  commit message, even where `AGENTS.md` or `CONTRIBUTING.md` suggest them.
+  The user tags the issue in the PR body.
 - **Trailers:**
   - `Signed-off-by: <git user.name> <git user.email>` via `git commit -s`.
   - `Assisted-by: Claude Opus 5.5`.
