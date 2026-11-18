@@ -37,12 +37,8 @@ reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
 - **No issue references** (`Fixes #123`, `Updates #123`, issue URLs) in the
   commit message, even where `AGENTS.md` or `CONTRIBUTING.md` suggest them.
   The user tags the issue in the PR body.
-- **Trailers:**
-  - `Signed-off-by: <git user.name> <git user.email>` via `git commit -s`.
-  - `Assisted-by: Claude Opus 5.5`.
-  - **No `Co-Authored-By` line.** gVisor's AI policy (`CONTRIBUTING.md`) says
-    the contributor remains the sole author. This overrides the default
-    attribution.
+- **Trailers:** none. gVisor does not use AI attribution trailers. This
+  overrides the default attribution.
 - **Amend, don't stack:** when the branch already has the commit for this
   change (iterating on a PR), amend it. A branch with several commits must have
   independent, logical commits that apply separately (for example a numbered
@@ -50,6 +46,5 @@ reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
 
 ## DCO note
 
-gVisor requires a Google CLA, not DCO. The sign-off is the user's own policy.
-Check that every commit in `base..HEAD` has a `Signed-off-by` that matches
-`git config user.email`.
+gVisor uses the DCO (`CONTRIBUTING.md`). Only a human can certify it, and
+`AGENTS.md` forbids agents to add `Signed-off-by` lines.

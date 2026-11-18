@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Get a reviewed change ready to send and commit it locally. Checks that self-review approved the current code (re-reviews any delta), runs format, lint, build, and impacted tests, checks for a current benchmark report when the change touches hot paths, writes the commit message with the project's trailers (e.g. sign-off, Assisted-by), and verifies DCO. Never pushes. Runs only when the user types /ship.
+description: Get a reviewed change ready to send and commit it locally. Checks that self-review approved the current code (re-reviews any delta), runs format, lint, build, and impacted tests, checks for a current benchmark report when the change touches hot paths, writes the commit message with the project's trailers, and reports which commits still need the user's DCO sign-off (it never adds Signed-off-by itself). Never pushes. Runs only when the user types /ship.
 argument-hint: "[--amend | --new] [--skip-review] [--no-benchmark] [-m <subject>]"
 disable-model-invocation: true
 ---
@@ -90,19 +90,25 @@ system changes.
   (no `#123`, `Fixes #123`, `Updates #123`, `Closes ...`, or issue URLs), even
   if the project's guidelines suggest it. The user tags the issue in the PR
   body. If the self-review draft has one, drop it from the commit message.
-- **Trailers:** use the overlay's trailers. Without an overlay, use
-  `git commit -s` plus the default attribution trailer from the session
-  instructions. Add trailers with `--trailer "<Key>: <value>"`; don't
-  hand-format them.
+- **Trailers:** use the overlay's trailers. Without an overlay, use the
+  default attribution trailer from the session instructions. Add trailers with
+  `--trailer "<Key>: <value>"`; don't hand-format them.
+- **No sign-off:** never add `Signed-off-by` (no `git commit -s`, no
+  `--signoff`, no `--trailer "Signed-off-by: ..."`), even if an overlay asks for
+  it. Only a human can certify the DCO. The user adds it after reading the
+  commit. When you amend or rewrite a commit, remove the user's own
+  `Signed-off-by` line (matching `git config user.name` and `user.email`): their
+  earlier sign-off does not cover your changes. Keep other people's sign-offs.
 - Stage only the files from step 1, then commit.
 
 ## 6. Verify
 
 - `git rev-parse HEAD^{tree}` equals the stamped tree. If not, explain why
   (for example, files intentionally left out).
-- **DCO:** every commit in `base..HEAD` has
-  `Signed-off-by: <user.name> <user.email>`:
+- **DCO:** list every commit that this run created or changed, plus any other
+  commit in `base..HEAD` that has no `Signed-off-by: <user.name> <user.email>`:
   `git log --format='%H%n%(trailers:key=Signed-off-by,valueonly)' base..HEAD`.
+  Don't add the line. Report it as the user's next step.
 - The required trailers are present, and forbidden ones (per the overlay) are
   absent.
 - The commit message has no issue references (`#<n>`, `Fixes`/`Updates`/
@@ -111,11 +117,14 @@ system changes.
 ## 7. Report
 
 - Commit SHA and subject.
-- Table of checks: format, lint, build, tests (with target count), DCO. Mark
-  each passed, failed, or skipped, and show the commands used.
+- Table of checks: format, lint, build, tests (with target count). Mark each
+  passed, failed, or skipped, and show the commands used.
+- DCO: the commits that need the user's sign-off, with the command to add it
+  (`git commit --amend -s --no-edit`, or `git rebase --signoff <base>`).
 - Review status: stamped (rounds, user decisions) or skipped.
 - Benchmark: report used (path, exact or near tree match), run now, shipped
   without numbers (by user choice), or not needed.
-- The push command for the user to run themselves (for example
-  `git push -u origin <branch>`, or `--force-with-lease` after an amend).
+- The push command for the user to run themselves after they sign off (for
+  example `git push -u origin <branch>`, or `--force-with-lease` after an
+  amend).
   **Never push.**

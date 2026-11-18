@@ -37,7 +37,8 @@ starts a review of the new changes only. Then it runs the format, lint, build,
 and test steps. If the change touches a performance-sensitive path, it looks for
 a benchmark report for the same code. If no such report exists, it asks the user
 what to do. It does not start a benchmark without permission. It writes the commit message and adds the trailers from the
-overlay. It makes sure that each commit has a sign-off. It does not push. The
+overlay. It does not add a sign-off, because only a human can certify the
+DCO. It tells the user which commits need one. It does not push. The
 skill runs only when the user types `/ship`.
 
 ### `~/.claude/skills/pr-review/SKILL.md`
@@ -86,10 +87,8 @@ and the commands to build and run the benchmarks.
 
 These files are the overlay for gVisor. The review rules tell the agent to read
 the gVisor documents: `.gemini/styleguide.md`, `AGENTS.md`, `CONTRIBUTING.md`,
-and `SECURITY.md`. The ship rules add `Signed-off-by` and
-`Assisted-by: Claude Opus 5.5` to each commit. They do not add
-`Co-Authored-By`, because the gVisor policy says that the contributor is the
-only author.
+and `SECURITY.md`. `AGENTS.md` forbids agents to add `Signed-off-by`. The
+user signs off each commit.
 
 ## Overlay detection
 
