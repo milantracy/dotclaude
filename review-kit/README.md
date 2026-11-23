@@ -108,10 +108,8 @@ and the commands to build and run the benchmarks.
 
 ### `projects/gvisor/`
 
-These files are the overlay for gVisor. The review rules tell the agent to read
-the gVisor documents: `.gemini/styleguide.md`, `AGENTS.md`, `CONTRIBUTING.md`,
-and `SECURITY.md`. `AGENTS.md` forbids agents to add `Signed-off-by`. The
-user signs off each commit.
+These files are the overlay for gVisor. See `projects/gvisor/review.md` for the
+documents it reads and how it maps the gVisor review rules to lenses.
 
 ## Overlay detection
 
