@@ -50,7 +50,8 @@ stop and report.
 
 After the checks, run `review-stamp check` again:
 - If only formatter output changed (the diff from the stamped tree is pure
-  formatting), run `review-stamp write` without re-review.
+  formatting), run `review-stamp write <base>` without re-review, with the
+  base from step 1.
 - Any other change: go back to step 2 (delta re-review).
 
 ## 4. Benchmark gate
@@ -98,17 +99,20 @@ system changes.
   it. Only a human can certify the DCO. The user adds it after reading the
   commit. When you amend or rewrite a commit, remove the user's own
   `Signed-off-by` line (matching `git config user.name` and `user.email`): their
-  earlier sign-off does not cover your changes. Keep other people's sign-offs.
+  earlier sign-off does not cover your changes. A commit that a rebase only
+  replays, with an unchanged diff, keeps its sign-off; check this with
+  `git range-diff <old-base>..<old-tip> <new-base>..<new-tip>` and treat any
+  commit it shows as changed as rewritten. Keep other people's sign-offs.
 - Stage only the files from step 1, then commit.
 
 ## 6. Verify
 
 - `git rev-parse HEAD^{tree}` equals the stamped tree. If not, explain why
   (for example, files intentionally left out).
-- **DCO:** list every commit that this run created or changed, plus any other
-  commit in `base..HEAD` that has no `Signed-off-by: <user.name> <user.email>`:
-  `git log --format='%H%n%(trailers:key=Signed-off-by,valueonly)' base..HEAD`.
-  Don't add the line. Report it as the user's next step.
+- **DCO:** list every commit whose diff this run created or changed, plus any
+  other commit in `base..HEAD` that has no `Signed-off-by: <user.name>
+  <user.email>`: `git log --format='%H%n%(trailers:key=Signed-off-by,valueonly)'
+  base..HEAD`. Don't add the line. Report it as the user's next step.
 - The required trailers are present, and forbidden ones (per the overlay) are
   absent.
 - The commit message has no issue references (`#<n>`, `Fixes`/`Updates`/
