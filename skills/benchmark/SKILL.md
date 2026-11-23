@@ -71,6 +71,8 @@ test is available, say so; don't invent significance.
 Before you believe a result, check:
 - **Plausible size:** does the delta fit the share of runtime that the change
   touches? A 20% win from code that takes 2% of the time is a measurement bug.
+- **Limiter:** what keeps the win from being larger? Name the bottleneck that
+  remains.
 - **Timed region:** is the target work inside it, and the setup outside it?
 - **Errors:** did any runs fail or take a shortcut? Do both sides do the same
   work (same output, same byte counts)?
