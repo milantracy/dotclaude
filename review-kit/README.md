@@ -8,26 +8,31 @@ This kit contains the shared parts of the review and ship workflow.
 
 This file defines the reviewer agent. The reviewer starts with no context. It
 reads the diff, the code around the diff, and the project overlay. It does not
-change files. It reports each problem with a severity, a location, and a failure
-scenario. In a blind review, it first finds the root cause without the author's
-reasoning. Then it reads the reasoning of the author and verifies each claim. In
-later rounds, it examines each fix and each rebuttal. It accepts a
-rebuttal only when the rebuttal has evidence. The `self-review` and `pr-review`
-skills use this agent.
+change files, and no overlay can change that rule. Each instance can get a lens:
+one objective, such as security or tests. The review skills start several
+instances in parallel, one per lens. Each reviewer reports each problem with a
+severity, a location, and a failure scenario. In a blind review, it first finds
+the root cause without the author's reasoning. Then it reads the reasoning of
+the author and verifies each claim. In follow-up exchanges, it examines the
+reply to each of its own findings: a fix, a rebuttal, or a request to leave the
+finding. It accepts a rebuttal only when the rebuttal has evidence. It cannot
+revert the change, so it writes a plan (`GATE4`) of the tests that must fail
+without the change. The coordinator runs that plan. The `self-review` and
+`pr-review` skills use this agent.
 
 ### `~/.claude/skills/self-review/SKILL.md`
 
-This skill reviews our own changes. It starts the reviewer agent. It gives the
-agent the diff, the overlay, and the context of the problem: the intent, the
-symptoms, the evidence, the expected behavior, the scope, and the constraints.
-It does not give the design or the reasons for the fix in the first pass. The
-reviewer then writes its own root cause and its findings. After that, we give
-the reviewer our root cause, our design, our rejected alternatives, and the
-draft commit message. The reviewer verifies each claim. It also compares the two
-root causes. These two steps are round one. We fix each problem or rebut it
-with evidence. The reviewer then examines our reply. This loop has a maximum
-of three rounds. If a serious problem stays open after round three, the skill
-asks the user to decide. At the end, the skill writes a review stamp.
+This skill reviews our own changes. It classifies the risk of the change and
+starts one reviewer agent per lens, in parallel. Each lens gets the context that
+`lenses.md` gives it. The correctness reviewer first forms its own root cause
+from the problem alone. Then it reads our root cause, design, rejected
+alternatives, and draft commit message, and verifies each claim. We merge the
+findings and check them with four gates. Gate 4 runs the tests with and without
+the change, in a separate worktree. We fix each problem or argue with its
+reviewer. We reject a reviewer's finding only when that reviewer agrees. Each
+new round starts fresh reviewers on the full change. The skill defines when the
+loop stops and which disputes go to the user. At the end, the skill writes a
+review stamp.
 
 ### `~/.claude/skills/ship/SKILL.md`
 
@@ -36,17 +41,20 @@ working tree with the review stamp. If the code changed after the review, it
 starts a review of the new changes only. Then it runs the format, lint, build,
 and test steps. If the change touches a performance-sensitive path, it looks for
 a benchmark report for the same code. If no such report exists, it asks the user
-what to do. It does not start a benchmark without permission. It writes the commit message and adds the trailers from the
-overlay. It does not add a sign-off, because only a human can certify the
-DCO. It tells the user which commits need one. It does not push. The
-skill runs only when the user types `/ship`.
+what to do. It does not start a benchmark without permission. It writes the
+commit message and adds the trailers from the overlay. It does not add a
+sign-off, because only a human can certify the DCO. It tells the user which
+commits need one. It does not push. The skill runs only when the user types
+`/ship`.
 
 ### `~/.claude/skills/pr-review/SKILL.md`
 
-This skill reviews pull requests from other persons. It gets the pull request
-and puts it in a separate worktree. It starts the reviewer agent. Then it
-examines each finding against the code and removes the incorrect findings. It
-writes a report with a verdict and a draft review comment for each finding. If an earlier
+This skill reviews pull requests from other persons. It gets the pull request,
+its comments, and its inline review threads, and puts the code in a separate
+worktree. It starts one reviewer agent per lens, in parallel. Then it merges the
+findings, removes feedback that is already on the pull request, and checks each
+finding with the four gates. It removes the incorrect findings. It writes a
+report with a verdict and a draft review comment for each finding. If an earlier
 report exists, it gives the status of each earlier problem. It posts comments
 only when the user tells it to post.
 
@@ -58,6 +66,19 @@ the result is statistically sound. It examines the numbers for usual errors and
 writes a report for the PR description. It does not change the system
 configuration. It gives the commands to the user instead.
 
+### `lenses.md`
+
+This file lists the lenses, the risk tiers, and the default lens set for each
+tier. It also says how much context each lens gets in each skill. A project
+overlay can replace the tiers, the lens sets, the context, and the
+objectives.
+
+### `coordinator.md`
+
+This file contains the rules that both review skills use as coordinator: the
+ledger, the four gates, the Gate 4 steps, and the rules for arguing with a
+reviewer. Each skill states only how it differs.
+
 ### `bin/review-stamp`
 
 This script records the state of the working tree that the review approved. It
@@ -67,9 +88,11 @@ after the review.
 
 ### `projects/<name>/review.md`
 
-This file contains the review rules for one project. The reviewer agent reads
-it. It tells the agent which project documents to read first. It also lists
-checks that are specific to the project.
+This file contains the review rules for one project. The reviewer agent and the
+review skills (as coordinator) read it. It tells the agent which project
+documents to read first, and lists checks that are specific to the project. It
+can also change anything that `lenses.md` or `coordinator.md` says an overlay
+can change.
 
 ### `projects/<name>/ship.md`
 
