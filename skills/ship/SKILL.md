@@ -87,10 +87,12 @@ system changes.
   if this session has one. Update it for any later changes. Otherwise draft it
   from the final diff and the change's intent. Follow the overlay's format
   rules. Show it to the user before committing.
-- **No issue references:** don't put issue or PR IDs in the commit message
-  (no `#123`, `Fixes #123`, `Updates #123`, `Closes ...`, or issue URLs), even
-  if the project's guidelines suggest it. The user tags the issue in the PR
-  body. If the self-review draft has one, drop it from the commit message.
+- **No issue references:** don't put issue or PR IDs in the commit message,
+  in any form (for example `#123`, `org/repo#123`, `GH-123`, `PROJ-123`,
+  `b/123`, `Fixes #123`, or an issue or PR URL), even if the project's
+  guidelines suggest it. Plain prose such as "Fixes a leak" is fine. The user
+  tags the issue in the PR body. If the self-review draft has one, drop it from
+  the commit message.
 - **Trailers:** use the overlay's trailers. Without an overlay, use the
   default attribution trailer from the session instructions. Add trailers with
   `--trailer "<Key>: <value>"`; don't hand-format them.
@@ -115,8 +117,7 @@ system changes.
   base..HEAD`. Don't add the line. Report it as the user's next step.
 - The required trailers are present, and forbidden ones (per the overlay) are
   absent.
-- The commit message has no issue references (`#<n>`, `Fixes`/`Updates`/
-  `Closes`, issue URLs).
+- The commit message follows the "No issue references" rule in step 5.
 
 ## 7. Report
 
