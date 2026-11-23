@@ -3,6 +3,9 @@
 Used by the `ship` skill. Re-read the PR guidelines in `AGENTS.md` and the "Code
 reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
 
+The `AGENTS.md` PR checklist requires adversarial review. The review gate
+(self-review) satisfies it, with the deviations listed in `review.md`.
+
 ## Checks (run in this order)
 
 1. **Format:** `gofmt -l` on changed `.go` files, and fix with `gofmt -w`. Run
