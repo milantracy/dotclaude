@@ -1,5 +1,6 @@
 #!/bin/sh
-# Links each item in this repo into ~/.claude. Safe to run again.
+# Links each item in this repo into ~/.claude, and removes links to items that
+# are gone. Safe to run again.
 # An existing non-link target is moved to <target>.bak.<timestamp> first.
 set -eu
 repo=$(cd "$(dirname "$0")" && pwd)
@@ -23,3 +24,11 @@ link() {
 for d in "$repo"/skills/*/; do link "skills/$(basename "$d")"; done
 for f in "$repo"/agents/*.md; do link "agents/$(basename "$f")"; done
 link review-kit
+
+# Remove links left behind by skills or agents that were renamed or deleted.
+for l in "$dest"/skills/* "$dest"/agents/*; do
+	[ -L "$l" ] && [ ! -e "$l" ] || continue
+	case $(readlink "$l") in
+	"$repo"/*) rm "$l" && echo "removed stale $l" ;;
+	esac
+done

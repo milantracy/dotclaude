@@ -67,7 +67,7 @@ Both skills use these sets, unless the overlay gives its own.
 
 Add **docs** when the change alters behavior that the documentation describes.
 
-**`--delta` mode** (self-review called by /ship): run correctness and
+**`--delta` mode** (self-review called by /shipme): run correctness and
 catch-all, each lens that the overlay marks as always required, and each lens
 whose area the delta touches.
 

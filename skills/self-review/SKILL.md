@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Review the changes we made with several independent reviewer subagents that start with no context, each with one lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one, and start fresh reviewers each round until the skill's stop rule is met (at most 5 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /ship checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
+description: Review the changes we made with several independent reviewer subagents that start with no context, each with one lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one, and start fresh reviewers each round until the skill's stop rule is met (at most 5 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /shipme checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
 argument-hint: "[base-ref | commit | range] [--delta <tree>] [--with-builtin]"
 ---
 
@@ -22,8 +22,8 @@ Read these kit files first:
     working tree, including uncommitted and untracked files.
   - With an argument: use that base, commit, or range. For a numbered series,
     review one commit at a time; see "Series mode" below.
-  - With `--delta <tree>` (passed by /ship): diff from that tree to the current
-    working tree.
+  - With `--delta <tree>` (passed by /shipme): diff from that tree to the
+    current working tree.
 - **Series mode** (`<sha>~1..<sha>`):
   1. The end of each round is that commit, not a tree snapshot.
   2. Ask the user once before the first history rewrite. Require a clean
@@ -44,7 +44,7 @@ Read these kit files first:
      Then `git rebase --continue` if you started a rebase. On a rebase
      conflict, abort the rebase, give the user the recorded commit (it
      stays in the reflog), and ask how to proceed.
-  4. This follows /ship's "No sign-off" rule (`skills/ship/SKILL.md`). List
+  4. This follows /shipme's "No sign-off" rule (`skills/shipme/SKILL.md`). List
      the commit in the report as needing the user's sign-off.
   5. The recorded commit is the next round's end (after `--continue`, HEAD
      is the series tip, not this commit).
@@ -61,7 +61,7 @@ Read these kit files first:
 - **Context:** write the blind brief (section 2) from the conversation, the
   issue, and the commits. Ask the user only for parts you really can't fill in.
 - **Commit message:** if no draft exists yet, draft it now. The
-  style-description lens and the reveal need it; /ship reuses it. Keep issue
+  style-description lens and the reveal need it; /shipme reuses it. Keep issue
   IDs (`#123`, `Fixes #123`, `Updates #123`) out of it; the user tags the issue
   in the PR body.
 
@@ -183,7 +183,7 @@ A finding that stays OPEN after the exchange limit is DISPUTED. "Escalate
 disagreements" says what happens next.
 
 After fixes, rerun the affected build, tests, and lint. If a fix can change
-performance on a hot path, say that /ship's benchmark gate applies.
+performance on a hot path, say that /shipme's benchmark gate applies.
 
 ## 6. Rounds 2 to 5
 
@@ -245,7 +245,7 @@ say in the report that the decided fix had no fresh review.
     - DROPPED built-in findings, with the reason.
   - Gate 4 and other tests run, with their results.
   - The final commit message / PR description draft (after reviewer fixes).
-  - Next step: `/ship`.
+  - Next step: `/shipme`.
 
-Don't create new commits or push. That is /ship's job. The one exception is
+Don't create new commits or push. That is /shipme's job. The one exception is
 series mode, where you amend the commit under review (section 1).

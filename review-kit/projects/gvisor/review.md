@@ -45,7 +45,7 @@ the in-tree files:
   cap (see the self-review skill) is lower.
 - **Benchmarks.** `AGENTS.md` has the coordinator run benchmarks after a
   fix that may change performance. The kit runs benchmarks only with the
-  user's permission (the `benchmark` skill and /ship's benchmark gate).
+  user's permission (the `benchmark` skill and /shipme's benchmark gate).
 - **Context for the correctness lens.** `AGENTS.md` starts every sub-agent
   with minimal context. The kit gives the correctness reviewer a blind brief
   (the problem, not the solution) and then the author's reasoning, so that

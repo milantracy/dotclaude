@@ -29,8 +29,8 @@ overrides the defaults below.
 - **Base:** `--base <ref>`, or by default `git merge-base HEAD <upstream default
   branch>`. **Change:** the current working tree, including uncommitted edits.
   Record both SHAs, plus the tree hash for the change from
-  `~/.claude/review-kit/bin/review-stamp tree`. `/ship` matches reports by this
-  hash.
+  `~/.claude/review-kit/bin/review-stamp tree`. `/shipme` matches reports by
+  this hash.
 - **Benchmarks:** from the diff, list the code paths the change touches. Pick
   the existing benchmarks that cover them (see the overlay). If none covers the
   effect directly, propose a new benchmark and write it first.

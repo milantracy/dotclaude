@@ -1,7 +1,7 @@
 # gVisor ship overlay
 
-Used by the `ship` skill. Re-read the PR guidelines in `AGENTS.md` and the "Code
-reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
+Used by the `shipme` skill. Re-read the PR guidelines in `AGENTS.md` and the
+"Code reviews" section of `CONTRIBUTING.md` on each run, in case they changed.
 
 The `AGENTS.md` PR checklist requires adversarial review. The review gate
 (self-review) satisfies it, with the deviations listed in `review.md`.
@@ -12,7 +12,7 @@ The `AGENTS.md` PR checklist requires adversarial review. The review gate
    `make lint-fix` only if `make lint` reports formatting problems.
 2. **Lint:** `make lint`. Also run `make lint-cc` if any `.cc` or `.h` file
    changed. Both run in the Docker wrapper and are slow; run them anyway. That is
-   what ship is for.
+   what /shipme is for.
 3. **Build:** `bazel build` (or `make build TARGETS=...`) for the targets that
    own the changed files.
 4. **Impacted tests:**
