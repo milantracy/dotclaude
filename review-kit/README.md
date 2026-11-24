@@ -34,7 +34,7 @@ new round starts fresh reviewers on the full change. The skill defines when the
 loop stops and which disputes go to the user. At the end, the skill writes a
 review stamp.
 
-### `~/.claude/skills/ship/SKILL.md`
+### `~/.claude/skills/shipme/SKILL.md`
 
 This skill prepares a reviewed change and commits it. First, it compares the
 working tree with the review stamp. If the code changed after the review, it
@@ -45,7 +45,7 @@ what to do. It does not start a benchmark without permission. It writes the
 commit message and adds the trailers from the overlay. It does not add a
 sign-off, because only a human can certify the DCO. It tells the user which
 commits need one. It does not push. The skill runs only when the user types
-`/ship`.
+`/shipme`.
 
 ### `~/.claude/skills/pr-review/SKILL.md`
 
@@ -83,7 +83,7 @@ reviewer. Each skill states only how it differs.
 
 This script records the state of the working tree that the review approved. It
 calculates one hash for the tracked files and the untracked files. It does not
-change the git index. The `ship` skill uses the script to find changes made
+change the git index. The `shipme` skill uses the script to find changes made
 after the review.
 
 ### `projects/<name>/review.md`
@@ -96,7 +96,7 @@ can change.
 
 ### `projects/<name>/ship.md`
 
-This file contains the ship rules for one project. The `ship` skill reads it.
+This file contains the ship rules for one project. The `shipme` skill reads it.
 It lists the check commands, the method to find the tests, and the commit
 format. It also lists the trailers that a commit must have.
 

@@ -17,7 +17,7 @@ at any time.
 
 - `skills/self-review/`: reviews our own changes with several independent
   reviewers, one per lens.
-- `skills/ship/`: runs the checks and commits a reviewed change.
+- `skills/shipme/`: runs the checks and commits a reviewed change.
 - `skills/pr-review/`: reviews pull requests from other persons.
 - `skills/benchmark/`: measures the performance effect of a change (A/B).
 - `agents/code-reviewer.md`: the independent reviewer agent.

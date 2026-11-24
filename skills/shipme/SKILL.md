@@ -1,11 +1,11 @@
 ---
-name: ship
-description: Get a reviewed change ready to send and commit it locally. Checks that self-review approved the current code (re-reviews any delta), runs format, lint, build, and impacted tests, checks for a current benchmark report when the change touches hot paths, writes the commit message with the project's trailers, and reports which commits still need the user's DCO sign-off (it never adds Signed-off-by itself). Never pushes. Runs only when the user types /ship.
+name: shipme
+description: Get a reviewed change ready to send and commit it locally. Checks that self-review approved the current code (re-reviews any delta), runs format, lint, build, and impacted tests, checks for a current benchmark report when the change touches hot paths, writes the commit message with the project's trailers, and reports which commits still need the user's DCO sign-off (it never adds Signed-off-by itself). Never pushes. Runs only when the user types /shipme.
 argument-hint: "[--amend | --new] [--skip-review] [--no-benchmark] [-m <subject>]"
 disable-model-invocation: true
 ---
 
-# Ship
+# Shipme
 
 Kit: `~/.claude/review-kit/`. Detect the overlay from its `README.md` and read
 `projects/<name>/ship.md` when one exists. The overlay overrides the defaults
