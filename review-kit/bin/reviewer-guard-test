@@ -1,0 +1,751 @@
+#!/usr/bin/env python3
+"""Tests reviewer-guard for real: each case goes through the hook, and the
+rewritten command runs in a throwaway repo under /tmp.
+
+- DENY: the command must leave no trace: the repo (files, dirs, modes,
+  symlinks, refs, config, staged index), a bare remote, and probe paths
+  under $HOME, the user's caches, /tmp, and the reviewer root.
+- FAIL: the command must exit non-zero (network, sockets, daemons, secrets).
+- ALLOW: the command must exit 0.
+- Guard checks: bad hook input and unsafe scratch dirs are blocked (exit 2),
+  the hook's own wrapper passes through unchanged, and a wrapper with
+  anything changed or appended is wrapped again and leaves no trace.
+
+Each DENY and FAIL case first runs without the sandbox as a control,
+except the ones in NO_CONTROL. The cases run once per shell in SHELLS that
+exists, with fake credential variables set. Cases for macOS services run
+only on macOS.
+
+Run it outside a code-reviewer session (inside one, the sandbox denies the
+writes the test needs): review-kit/bin/reviewer-guard-test
+
+Not tested: the scratch-dir owner check (it needs a second user), the checks
+on the scratch root itself, the root-owner check on the sandbox tools, the
+Apple events, launchd job, and task-port denies (osascript's exec deny fires
+first, launchctl submit fails in the sandbox anyway, and task_for_pid fails
+without developer mode), bwrap itself (the Linux resend and mask logic runs
+with bwrap stubbed), and the hook timeout.
+"""
+import hashlib
+import io
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+from unittest import mock
+
+GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "reviewer-guard")
+AGENT = f"guard-test-{os.getpid()}"
+HOME = os.path.expanduser("~")
+TAG = f"reviewer-guard-test-{os.getpid()}"
+ROOT = f"/tmp/claude-reviewer-{os.getuid()}"
+REMOTE = f"/tmp/{TAG}-remote.git"
+UNIX_SOCK = f"/tmp/{TAG}.sock"
+HELPERS = f"/tmp/{TAG}-helpers"  # scripts and dirs the cases read
+THD_DIR = f"/tmp/sh-thd-{TAG}"  # matches the bash heredoc rule's prefix
+# Links that the heredoc rule lets a command create; writes through them
+# must still not reach the repo.
+THD_LINKS = [f"/tmp/sh-thd-{TAG}-l", f"/tmp/sh-thd-{TAG}-s"]
+MACOS = sys.platform == "darwin"
+PREFS = os.path.join(HOME, "Library", "Preferences", f"{TAG}.plist")
+PROBES = [os.path.join(HOME, f".{TAG}"),
+          os.path.join(HOME, ".cache", TAG),
+          os.path.join(HOME, "Library", "Caches", TAG),
+          os.path.join("/tmp", TAG),
+          os.path.join("/var/tmp", TAG),
+          os.path.join(ROOT, TAG),
+          os.path.join(THD_DIR, "x")] + ([PREFS] if MACOS else [])
+# Credential files the sandbox must not read (the guard may list more).
+SECRETS = [".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".config/gh",
+           ".config/hub", ".config/github-copilot", ".config/op",
+           ".config/git/credentials", ".netrc", ".git-credentials",
+           ".docker/config.json", ".claude/.credentials.json", ".claude.json",
+           ".claude.json.backup", ".claude/backups", ".codex/auth.json",
+           ".kube", ".npmrc", ".pypirc", ".pgpass", ".gem/credentials",
+           ".m2/settings.xml", ".gradle/gradle.properties",
+           ".cache/huggingface/token", ".vault-token", ".cargo/credentials",
+           ".cargo/credentials.toml", ".terraform.d", ".zsh_history",
+           ".zsh_sessions", ".bash_history",
+           # Shell startup files can export tokens; the sandbox must not
+           # read them.
+           ".zshenv", ".zshrc", ".zprofile", ".zlogin", ".bashrc",
+           ".bash_profile", ".profile"]
+# Variables the sandbox must not see, in different styles of name.
+FAKE_SECRETS = {n: "x" for n in [
+    "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_PAT", "RG_API_KEY", "X_SECRET",
+    "DB_PASSWORD", "DATABASE_URL", "npm_token", "GIT_ASKPASS", "SSH_ASKPASS",
+    "DOCKER_HOST", "SSH_AUTH_SOCK", "BASH_ENV", "ENV"]}
+# Variables the sandbox keeps: a toolchain setting and a locale variable.
+KEPT = {"GONOSUMDB": "rgtest", "LC_RGTEST": "rgtest"}
+GIT = "git -c user.name=t -c user.email=t@t"
+SETUP = (f"git init -q && echo a > a.txt && git add a.txt && "
+         f"{GIT} commit -qm init && "
+         "git symbolic-ref refs/remotes/origin/HEAD refs/heads/main && "
+         f"git init -q --bare {REMOTE}")
+SHELLS = ["/bin/zsh", "/bin/bash"]
+# Appended to or swapped into the hook's wrapper: each must be wrapped again.
+TAMPER = ["{w};touch\\ {p}", "{w}&&touch\\ {p}", "{w}|touch\\ {p}",
+          "{w}>{p}", "{w}$(touch\\ {p})", "{w}`touch\\ {p}`",
+          "{pre} \"$(touch {p})\"", "{pre} 'true'>{p}",
+          "{pre} 'true';touch\\ {p}", "{pre} \"true;touch {p}\""]
+
+DENY = [
+    "touch new.txt",
+    "echo x > a.txt",
+    "echo x >& a.txt",
+    "rm a.txt",
+    "mv a.txt b.txt",
+    "cp a.txt b.txt",
+    "mkdir d",
+    "chmod +x a.txt",
+    "ln -s a.txt l",
+    'ln a.txt "$TMPDIR/hard" && echo x >> "$TMPDIR/hard"',
+    'ln -s "$PWD" "$TMPDIR/sym" && echo x > "$TMPDIR/sym/a.txt"',
+    "sed -i.bak s/a/b/ a.txt",
+    "python3 -c 'open(\"p.txt\", \"w\")'",
+    "for f in a.txt; do rm $f; done",
+    "git ls-files | xargs rm",
+    "bash -lc 'rm a.txt'",
+    f"{GIT} commit --allow-empty -m x",
+    "git rm -q --cached a.txt",
+    "git branch newb",
+    "git config core.fsmonitor 'touch fsm.txt'",
+    "git log --output=out.txt",
+    "git -c core.fsmonitor='touch fsm.txt; false' status",
+    "git -c diff.external='touch ext.txt; false' show --ext-diff HEAD",
+    f"git push {REMOTE} HEAD:refs/heads/x",
+    f"echo x > {THD_DIR}/x",
+    f"ln a.txt {THD_LINKS[0]} && echo x >> {THD_LINKS[0]}",
+    f'ln -s "$PWD" {THD_LINKS[1]} && echo x > {THD_LINKS[1]}/a.txt',
+] + [f"touch {p}" for p in PROBES]
+if MACOS:
+    DENY.append(f"defaults write {TAG} k v")  # cfprefsd writes for us
+
+FAIL = [
+    # Local listeners started by this test: no network dependence.
+    "python3 -c 'import socket,sys; socket.create_connection("
+    "(\"127.0.0.1\", int(sys.argv[1])), 2)' {port}",
+    "python3 -c 'import socket; s = socket.socket(socket.AF_UNIX); "
+    f"s.connect(\"{UNIX_SOCK}\")'",
+    f'echo x >> "{ROOT}/{AGENT}.sb"',
+    f"kill -0 {os.getpid()}",  # a process outside the sandbox
+]
+if MACOS:
+    FAIL += [
+        # The scratch dir itself: removing or replacing it would steer the
+        # next profile. (On Linux it is a mount point instead.)
+        'chmod 711 "$TMPDIR"',  # 700 would be a no-op
+        # Each of these runs in the sandbox only if its exec deny is gone.
+        "osascript -e 'return 1'",
+        "launchctl version",
+        "security help",
+        # open fails in the sandbox anyway; require the exec refusal.
+        "open -h >/dev/null 2>&1; test $? -lt 126",
+        "shortcuts list",
+        "pbpaste",
+        "echo x > {tty}",  # a terminal (one this test opened)
+        f"/usr/bin/python3 {HELPERS}/windowserver.py",
+        # Without the binaries: the keychain and LaunchServices directly.
+        f"/usr/bin/python3 {HELPERS}/keychain.py",
+        f"/usr/bin/python3 {HELPERS}/lsopen.py {HELPERS}/empty",
+    ]
+# Not run unsandboxed as a control: these would act (open Finder) or
+# change the test's own state.
+NO_CONTROL = {f"/usr/bin/python3 {HELPERS}/lsopen.py {HELPERS}/empty",
+              f'echo x >> "{ROOT}/{AGENT}.sb"'}
+
+ALLOW = [
+    "git log --oneline",
+    "git status",
+    "git diff HEAD",
+    "git branch --contains HEAD",
+    "cat a.txt",
+    "grep -n '$(git stash)' a.txt || true",
+    "echo hi >&2",
+    'echo x > "$TMPDIR/f" && cat "$TMPDIR/f"',
+    "cat > \"$TMPDIR/n\" <<'EOF'\nit's a note; git commit -m x\nEOF",
+    # A bash script's heredoc, whatever the user's shell.
+    "/bin/bash -c 'cat <<EOF\nx\nEOF'",
+    f'git init -q "$TMPDIR/r" && {GIT} -C "$TMPDIR/r" commit -q '
+    "--allow-empty -m x",
+    'mkdir -p "$XDG_CACHE_HOME" "$GOCACHE" && touch "$GOCACHE/x"',
+    "test -z \"" + "".join(f"${{{n}}}" for n in FAKE_SECRETS) + "\"",
+    'test -n "$HOME" && test -n "$PATH"',
+    'test "$GOPROXY" = off && test "$GIT_TERMINAL_PROMPT" = 0 && '
+    'test "$PIP_CACHE_DIR" = "$TMPDIR/pip"',
+    'mkdir "$TMPDIR/d" && touch "$TMPDIR/d/f" && rm -r "$TMPDIR/d"',
+    " && ".join(f'test "${n}" = {v}' for n, v in KEPT.items()),
+    "echo x > /dev/null && echo x > /dev/stdout && echo x > /dev/zero",
+    "sleep 5 & kill $!",
+]
+if shutil.which("go"):
+    ALLOW.append('printf "package main\\nfunc main() {}\\n" > "$TMPDIR/m.go" '
+                 '&& go build -o "$TMPDIR/m" "$TMPDIR/m.go"')
+
+KEYCHAIN_PY = """import ctypes, sys
+sec = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/"
+                 "CoreFoundation")
+cf.CFDictionaryCreate.restype = ctypes.c_void_p
+cf.CFDictionaryCreate.argtypes = [ctypes.c_void_p] * 3 + [ctypes.c_long] + [
+    ctypes.c_void_p] * 2
+cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                         ctypes.c_uint32]
+sym = lambda lib, n: ctypes.c_void_p.in_dll(lib, n).value
+keys = (ctypes.c_void_p * 2)(sym(sec, "kSecClass"),
+                             sym(sec, "kSecAttrService"))
+vals = (ctypes.c_void_p * 2)(sym(sec, "kSecClassGenericPassword"),
+                             cf.CFStringCreateWithCString(
+                                 None, b"reviewer-guard-no-such-item",
+                                 0x08000100))
+q = cf.CFDictionaryCreate(
+    None, keys, vals, 2,
+    ctypes.addressof(ctypes.c_char.in_dll(cf, "kCFTypeDictionaryKeyCallBacks")),
+    ctypes.addressof(ctypes.c_char.in_dll(cf,
+                                          "kCFTypeDictionaryValueCallBacks")))
+sec.SecItemCopyMatching.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+# errSecItemNotFound means the keychain answered.
+sys.exit(0 if sec.SecItemCopyMatching(q, None) == -25300 else 3)
+"""
+WINDOWSERVER_PY = """import ctypes, sys
+cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/"
+                 "CoreGraphics")
+cg.CGSessionCopyCurrentDictionary.restype = ctypes.c_void_p
+sys.exit(0 if cg.CGSessionCopyCurrentDictionary() else 3)
+"""
+LSOPEN_PY = """import ctypes, sys
+cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/"
+                 "CoreFoundation")
+ls = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/"
+                 "CoreServices")
+f = cf.CFURLCreateFromFileSystemRepresentation
+f.restype = ctypes.c_void_p
+f.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_bool]
+path = sys.argv[1].encode()
+ls.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+sys.exit(0 if ls.LSOpenCFURLRef(f(None, path, len(path), True), None) == 0
+         else 3)
+"""
+
+
+def run(cmd, cwd, env):
+    return subprocess.run(["sh", "-c", cmd], cwd=cwd, capture_output=True,
+                          text=True, env=env)
+
+
+def snapshot(repo, env):
+    """Hashes everything a reviewer must not change."""
+    h = hashlib.sha256()
+    for root, dirs, files in os.walk(repo):
+        dirs.sort()
+        for name in sorted(files + dirs):
+            p = os.path.join(root, name)
+            rel = os.path.relpath(p, repo)
+            if rel == os.path.join(".git", "index"):
+                continue  # stat-cache refreshes; staging is hashed below
+            st = os.lstat(p)
+            h.update(f"{rel}:{stat.S_IMODE(st.st_mode)}:".encode())
+            if stat.S_ISLNK(st.st_mode):
+                h.update(b"link:" + os.readlink(p).encode())
+            elif stat.S_ISDIR(st.st_mode):
+                h.update(b"dir")
+            else:
+                with open(p, "rb") as f:
+                    h.update(f.read())
+    h.update(run("git ls-files -s", repo, env).stdout.encode())
+    h.update(run(f"git -C {REMOTE} for-each-ref", repo, env).stdout.encode())
+    return h.hexdigest()
+
+
+def leaked():
+    return [p for p in PROBES if os.path.lexists(p)]
+
+
+def remove(paths):
+    for p in paths:
+        if p == PREFS:  # cfprefsd may keep the domain cached
+            subprocess.run(["defaults", "delete", TAG], capture_output=True)
+        if os.path.lexists(p):
+            os.remove(p)
+
+
+def load_guard():
+    sys.dont_write_bytecode = True  # no __pycache__ next to the guard
+    loader = importlib.machinery.SourceFileLoader("reviewer_guard", GUARD)
+    spec = importlib.util.spec_from_loader("reviewer_guard", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def hook(payload, env):
+    return subprocess.run([GUARD], input=payload, capture_output=True,
+                          text=True, env=env)
+
+
+def hook_input(cmd, agent=AGENT):
+    return json.dumps({"tool_name": "Bash", "agent_id": agent,
+                       "tool_input": {"command": cmd}})
+
+
+def guarded(cmd, env):
+    r = hook(hook_input(cmd), env)
+    if r.returncode != 0:
+        raise SystemExit(f"guard exited {r.returncode}: {r.stderr.strip()}")
+    return json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"][
+        "command"]
+
+
+def report(ok, kind, cmd, why=""):
+    print(f"{'ok  ' if ok else 'FAIL'} {kind:6} {cmd!r}"
+          + ("" if ok else f"  ({why})"))
+    return 0 if ok else 1
+
+
+def listen():
+    """Starts a TCP listener on loopback and a unix socket listener, and
+    checks that both accept connections outside the sandbox."""
+    tcp = socket.socket()
+    tcp.bind(("127.0.0.1", 0))
+    tcp.listen()
+    unix = socket.socket(socket.AF_UNIX)
+    unix.bind(UNIX_SOCK)
+    unix.listen()
+    def serve(s):
+        while True:
+            s.accept()[0].close()
+
+    for s in (tcp, unix):
+        threading.Thread(target=serve, args=(s,), daemon=True).start()
+    socket.create_connection(tcp.getsockname(), 2).close()
+    c = socket.socket(socket.AF_UNIX)
+    c.connect(UNIX_SOCK)
+    c.close()
+    return tcp.getsockname()[1]
+
+
+def reset(repo, env):
+    remove(leaked())
+    shutil.rmtree(repo)
+    shutil.rmtree(REMOTE, ignore_errors=True)
+    os.makedirs(repo)
+    run(SETUP, repo, env)
+
+
+def guard_checks(env):
+    failures = 0
+    bad = {
+        "non-JSON input": "not json",
+        "no command": json.dumps({"agent_id": AGENT, "tool_input": {}}),
+        "no agent id": json.dumps({"tool_input": {"command": "true"}}),
+        "agent id ..": hook_input("true", ".."),
+        "agent id .": hook_input("true", "."),
+        "agent id a/b": hook_input("true", "a/b"),
+    }
+    for name, payload in bad.items():
+        r = hook(payload, env)
+        failures += report(r.returncode == 2 and not r.stdout, "block", name,
+                           f"rc={r.returncode} stdout={r.stdout[:80]!r}")
+    # Unsafe scratch dirs: a symlink, and a dir others can write.
+    own = tempfile.mkdtemp(prefix=TAG + "-own-", dir="/tmp")
+    for name, make in [("symlinked scratch dir",
+                        lambda p: os.symlink(own, p)),
+                       ("world-writable scratch dir",
+                        lambda p: (os.mkdir(p), os.chmod(p, 0o777))),
+                       ("group-writable scratch dir",
+                        lambda p: (os.mkdir(p), os.chmod(p, 0o770)))]:
+        agent = f"{AGENT}-unsafe"
+        path = os.path.join(ROOT, agent)
+        make(path)
+        try:
+            r = hook(hook_input("true", agent), env)
+        finally:
+            if os.path.islink(path):
+                os.remove(path)
+            else:
+                os.rmdir(path)
+        failures += report(r.returncode == 2 and not r.stdout, "block", name,
+                           f"rc={r.returncode}")
+    os.rmdir(own)
+
+    # A reissued wrapper passes through, also for commands with quotes,
+    # $, ;, and newlines in them.
+    heredoc = next(c for c in ALLOW if "<<'EOF'" in c)
+    for cmd in ["true", "git diff a b; git status", heredoc,
+                "echo \"$HOME\" 'x' $(true)\nprintf '%s' \"a b\""]:
+        r = hook(hook_input(guarded(cmd, env)), env)
+        failures += report(r.returncode == 0 and not r.stdout, "pass",
+                           f"reissued wrapper of {cmd!r} passes through",
+                           f"rc={r.returncode} stdout={r.stdout[:80]!r}")
+    wrapped = guarded("true", env)
+    swapped = re.sub(r"sandbox-exec -f \S+",
+                     "sandbox-exec -p '(version 1)(allow default)'", wrapped)
+    swapped = re.sub(r"bwrap .* --bind \S+ \S+", "bwrap --bind / /", swapped)
+    pre = wrapped[:-len(" true")]  # the wrapper without its argument
+    cases = [("a wrapper with a permissive profile", swapped)] + [
+        (f"wrapper tampered as {t!r}",
+         t.format(w=wrapped, pre=pre, p=PROBES[3])) for t in TAMPER]
+    for name, cmd in cases:
+        r = hook(hook_input(cmd), env)
+        out = (json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]
+               ["command"] if r.returncode == 0 and r.stdout else None)
+        if out:  # run what the hook returned: it must leave no trace
+            run(out, "/tmp", env)
+        left = leaked()
+        remove(left)
+        failures += report(bool(out) and out != cmd and not left, "wrap",
+                           name, f"rc={r.returncode} passed={not r.stdout} "
+                           f"left={left}")
+
+    for shell, want in [("/bin/zsh", "/bin/zsh -f -c"),
+                        ("/bin/sh", "/bin/sh -c"),
+                        ("/usr/local/bin/fish", "/bin/bash -c"),
+                        ("zsh", "/bin/bash -c")]:
+        cmd = guarded("true", dict(env, SHELL=shell))
+        failures += report(want in cmd, "shell", f"SHELL={shell}", cmd[-60:])
+
+    # The other Bash tool fields come back unchanged.
+    fields = {"command": "true", "timeout": 5000, "run_in_background": True,
+              "description": "d"}
+    r = hook(json.dumps({"agent_id": AGENT, "tool_input": fields}), env)
+    got = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]
+    failures += report(all(got.get(k) == v for k, v in fields.items()
+                           if k != "command"), "fields",
+                       "timeout, run_in_background, description kept",
+                       f"{got}")
+
+    # A stale or weaker profile is replaced on the next call.
+    if MACOS:
+        profile = os.path.join(ROOT, AGENT + ".sb")
+        with open(profile, "w") as f:
+            f.write("(version 1)(allow default)")
+        guarded("true", env)
+        with open(profile) as f:
+            ok = "(deny network*)" in f.read()
+        failures += report(ok, "file", "a stale profile is replaced")
+
+    # Programs named env, sandbox-exec, or bwrap early in PATH don't run
+    # outside the sandbox. env and sandbox-exec are named by absolute path;
+    # bwrap is looked up in PATH and must be root-owned, so on Linux the
+    # fake one makes the hook block.
+    fake = os.path.join(HELPERS, "path")
+    os.makedirs(fake, exist_ok=True)
+    for name in ["env", "sandbox-exec", "bwrap"]:
+        with open(os.path.join(fake, name), "w") as f:
+            f.write(f"#!/bin/sh\ntouch {PROBES[3]}\n")
+        os.chmod(os.path.join(fake, name), 0o755)
+    penv = dict(env, PATH=fake + ":" + env["PATH"])
+    r = hook(hook_input("true"), penv)
+    if r.returncode == 0 and r.stdout:
+        run(json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]
+            ["command"], "/tmp", penv)
+    left = leaked()
+    remove(left)
+    failures += report(not left and (r.returncode == 0 or not MACOS), "path",
+                       "fake env, sandbox-exec, and bwrap in PATH",
+                       f"rc={r.returncode} left={left}")
+
+    failures += linux_checks()
+    failures += swap_check()
+
+    failures += secret_checks(env)
+    return failures
+
+
+def secret_checks(env):
+    """Every SECRETS entry, in a fake home, can't be read; a symlinked one
+    can't be read through the link or at its target; other files can."""
+    failures = 0
+    home = os.path.join(HELPERS, "home")
+    target = os.path.join(HELPERS, "ssh-target")
+    os.makedirs(target)
+    with open(os.path.join(target, "id"), "w") as f:
+        f.write("key\n")
+    secrets = SECRETS + [s for s in load_guard().SECRETS if s not in SECRETS]
+    for s in secrets:
+        p = os.path.join(home, s)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if s == ".ssh":
+            os.symlink(target, p)
+        else:
+            with open(p, "w") as f:
+                f.write("secret\n")
+    with open(os.path.join(home, "ok.txt"), "w") as f:
+        f.write("ok\n")
+    with open(os.path.join(home, ".zshenv"), "w") as f:
+        f.write("export RG_ZSHENV=leak\n")
+    henv = dict(env, HOME=home)
+    for s in secrets:
+        p = os.path.join(home, s) + ("/id" if s == ".ssh" else "")
+        r = run(guarded(f"cat {p}", henv), "/tmp", henv)
+        failures += report(r.returncode != 0, "secret", f"cat ~/{s}",
+                           f"rc={r.returncode}")
+    r = run(guarded(f"cat {target}/id", henv), "/tmp", henv)
+    failures += report(r.returncode != 0, "secret",
+                       "cat the target of ~/.ssh", f"rc={r.returncode}")
+    if os.path.exists("/bin/zsh"):
+        zenv = dict(henv, SHELL="/bin/zsh")
+        r = run(guarded('test -z "$RG_ZSHENV"', zenv), "/tmp", zenv)
+        failures += report(r.returncode == 0, "secret",
+                           "~/.zshenv doesn't run in the sandbox",
+                           f"rc={r.returncode}")
+    r = run(guarded(f"cat {home}/ok.txt", henv), "/tmp", henv)
+    failures += report(r.returncode == 0, "secret", "cat ~/ok.txt (allowed)",
+                       f"rc={r.returncode}: {r.stderr.strip()[:200]}")
+    return failures
+
+
+def swap_check():
+    """A symlink swapped in for the scratch dir right after the hook's check
+    doesn't become the path the hook returns (and the profile allows)."""
+    g = load_guard()
+    path = os.path.join(ROOT, f"{AGENT}-swap")
+    target = tempfile.mkdtemp(prefix=TAG + "-target-", dir="/tmp")
+    real_lstat = os.lstat
+    swapped = []
+
+    def lstat(p, *a, **k):
+        st = real_lstat(p, *a, **k)
+        if p == path and not swapped:  # the race: swap after the check
+            swapped.append(1)
+            os.rmdir(path)
+            os.symlink(target, path)
+        return st
+
+    try:
+        with mock.patch.object(g.os, "lstat", lstat):
+            got = g.private_dir(path)
+        ok = os.path.realpath(target) not in got and got == path
+    except Exception as e:
+        ok, got = False, repr(e)
+    finally:
+        if os.path.lexists(path):
+            os.remove(path) if os.path.islink(path) else os.rmdir(path)
+        os.rmdir(target)
+    return report(ok, "block", "a scratch dir swapped after the check",
+                  f"got={got}")
+
+
+def linux_checks():
+    """The Linux resend and mask logic, with bwrap stubbed (nothing runs)."""
+    failures = 0
+    g = load_guard()
+    agent = f"{AGENT}-linux"
+    masks = [["--tmpfs", "/tmp/tmux-1"]]
+
+    def hook_sim(cmd):
+        out = []
+        stdin = json.dumps({"agent_id": agent,
+                            "tool_input": {"command": cmd}})
+        with mock.patch.object(g.sys, "platform", "linux"), \
+                mock.patch.object(g, "system_tool",
+                                  lambda p: "/usr/bin/bwrap"), \
+                mock.patch.object(g, "linux_masks", lambda: list(masks[0])), \
+                mock.patch.object(g.sys, "stdin", io.StringIO(stdin)), \
+                mock.patch.object(g.json, "dump",
+                                  lambda o, f: out.append(o)):
+            rc = g.main()
+        return rc, (out[0]["hookSpecificOutput"]["updatedInput"]["command"]
+                    if out else None)
+
+    try:
+        _, w1 = hook_sim("true")
+        masks[0] = []  # the tmux socket dir went away
+        rc, out = hook_sim(w1)
+        failures += report(rc == 0 and out is None, "linux",
+                           "a resend after /tmp changed passes through")
+        _, out = hook_sim(w1 + ";touch x")
+        failures += report(out is not None, "linux",
+                           "a tampered resend is wrapped again")
+        _, w2 = hook_sim("true")
+        failures += report("/tmp/tmux-1" not in w2, "linux",
+                           "a fresh wrapper drops a gone mask")
+        hook_sim("ls")
+        _, out = hook_sim(w1)
+        failures += report(out is not None, "linux",
+                           "a wrapper two calls old is wrapped again")
+    finally:
+        shutil.rmtree(os.path.join(ROOT, agent), ignore_errors=True)
+        for n in os.listdir(ROOT):
+            if n.startswith(agent + "."):
+                os.remove(os.path.join(ROOT, n))
+
+    # linux_masks: a known socket dir gets a tmpfs, a socket of any name
+    # and a secret file get /dev/null, a plain file stays, a /tmp entry
+    # removed during the scan is skipped, and an unlistable /tmp blocks.
+    real_lstat = os.lstat
+    modes = {"/tmp/tmux-1": stat.S_IFDIR | 0o700,
+             "/tmp/.s.PGSQL.5432": stat.S_IFSOCK | 0o777,
+             "/tmp/plain.txt": stat.S_IFREG | 0o644}
+
+    def lstat(p, *a, **k):
+        if p == "/tmp/zz-gone":
+            raise FileNotFoundError(p)
+        if p in modes:
+            return os.stat_result((modes[p],) + (0,) * 9)
+        return real_lstat(p, *a, **k)
+
+    def masked(m, flag, p):
+        return any(m[i:i + len(flag) + 1] == flag + [p] for i in range(len(m)))
+
+    netrc = os.path.realpath(os.path.join(HOME, ".netrc"))
+    with mock.patch.object(g.os, "listdir", lambda d: [
+                "tmux-1", "zz-gone", ".s.PGSQL.5432", "plain.txt"]), \
+            mock.patch.object(g.os, "lstat", lstat), \
+            mock.patch.object(g.os.path, "isdir",
+                              lambda p: p == "/tmp/tmux-1"), \
+            mock.patch.object(g.os.path, "lexists", lambda p: True):
+        m = g.linux_masks()
+    dev_null = ["--ro-bind", "/dev/null"]
+    for ok, name in [
+            (masked(m, ["--tmpfs"], "/tmp/tmux-1"), "a tmux dir gets a tmpfs"),
+            (masked(m, dev_null, "/tmp/.s.PGSQL.5432"),
+             "a socket of any name is hidden"),
+            (masked(m, dev_null, netrc), "a secret file is hidden"),
+            ("/tmp/plain.txt" not in m, "a plain /tmp file is not masked"),
+            ("/tmp/zz-gone" not in m,
+             "a vanished /tmp entry keeps the other masks")]:
+        failures += report(ok, "linux", name, f"{m}")
+    with mock.patch.object(g.os, "listdir",
+                           mock.Mock(side_effect=PermissionError("x"))):
+        try:
+            g.linux_masks()
+            blocked = False
+        except g.Blocked:
+            blocked = True
+    failures += report(blocked, "linux", "an unlistable /tmp blocks")
+    return failures
+
+
+def controls(env, port, tty, master):
+    """Each DENY and FAIL case does what it tests when not sandboxed, so a
+    case can't pass for an unrelated reason."""
+    failures = 0
+    cenv = dict(env, TMPDIR=os.path.join(HELPERS, "ctl"))
+    os.makedirs(cenv["TMPDIR"], exist_ok=True)
+    repo = tempfile.mkdtemp(prefix=TAG + "-ctl-", dir="/tmp")
+    try:
+        run(SETUP, repo, cenv)
+        for cmd in DENY:
+            before = snapshot(repo, cenv)
+            run(cmd, repo, cenv)
+            left = leaked()
+            changed = snapshot(repo, cenv) != before
+            failures += report(changed or bool(left), "ctl", cmd,
+                               "no effect without the sandbox")
+            scrub()
+            reset(repo, cenv)
+        for cmd in FAIL:
+            if cmd in NO_CONTROL:
+                continue
+            cmd = cmd.format(port=port, tty=tty)
+            r = run(cmd, repo, cenv)
+            failures += report(r.returncode == 0, "ctl", cmd,
+                               f"rc={r.returncode} without the sandbox")
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+        shutil.rmtree(REMOTE, ignore_errors=True)
+        try:
+            os.read(master, 1024)  # the control's write to the pty
+        except BlockingIOError:
+            pass
+    return failures
+
+
+def scrub():
+    for p in THD_LINKS:
+        if os.path.lexists(p):
+            os.remove(p)
+
+
+def setup_helpers():
+    os.makedirs(os.path.join(HELPERS, "empty"))
+    os.makedirs(THD_DIR)
+    for name, text in [("keychain.py", KEYCHAIN_PY), ("lsopen.py", LSOPEN_PY),
+                       ("windowserver.py", WINDOWSERVER_PY)]:
+        with open(os.path.join(HELPERS, name), "w") as f:
+            f.write(text)
+
+
+def run_cases(env, port, tty):
+    failures = 0
+    repo = tempfile.mkdtemp(prefix=TAG + "-repo-", dir="/tmp")
+    try:
+        run(SETUP, repo, env)
+        for cmd in DENY:
+            before = snapshot(repo, env)
+            r = run(guarded(cmd, env), repo, env)
+            left = leaked()
+            changed = snapshot(repo, env) != before
+            failures += report(not changed and not left, "deny", cmd,
+                               f"rc={r.returncode}, changed repo={changed}, "
+                               f"left={left}")
+            scrub()
+            if changed or left:
+                reset(repo, env)
+        for cmd in FAIL:
+            cmd = cmd.format(port=port, tty=tty)
+            r = run(guarded(cmd, env), repo, env)
+            failures += report(r.returncode != 0, "fail", cmd,
+                               f"rc={r.returncode}")
+        for cmd in ALLOW:
+            r = run(guarded(cmd, env), repo, env)
+            failures += report(r.returncode == 0, "allow", cmd,
+                               f"rc={r.returncode}: {r.stderr.strip()[:200]}")
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+        shutil.rmtree(REMOTE, ignore_errors=True)
+    return failures
+
+
+def main():
+    failures = 0
+    try:
+        setup_helpers()
+        port = listen()
+        master, slave = os.openpty()
+        tty = os.ttyname(slave)
+        os.set_blocking(master, False)
+        if shutil.which("docker") and subprocess.run(
+                ["docker", "version"], capture_output=True).returncode == 0:
+            FAIL.append("docker version")
+        print("--- controls (no sandbox)")
+        failures += controls(dict(os.environ, **KEPT), port, tty, master)
+        for shell in SHELLS:
+            if not os.path.exists(shell):
+                continue
+            print(f"--- SHELL={shell}")
+            env = dict(os.environ, SHELL=shell, **FAKE_SECRETS, **KEPT)
+            failures += run_cases(env, port, tty)
+            try:
+                written = os.read(master, 1024)
+            except BlockingIOError:
+                written = b""
+            failures += report(not written, "tty", f"nothing reached {tty}",
+                               f"{written!r}")
+        print("--- guard checks")
+        failures += guard_checks(dict(os.environ, SHELL="/bin/bash"))
+    finally:
+        remove(leaked() + [UNIX_SOCK])
+        scrub()
+        for d in [HELPERS, THD_DIR, os.path.join(ROOT, AGENT)]:
+            shutil.rmtree(d, ignore_errors=True)
+        for n in os.listdir(ROOT) if os.path.isdir(ROOT) else []:
+            if n.startswith((AGENT + ".", AGENT + "-unsafe")):
+                os.remove(os.path.join(ROOT, n))
+    print(f"{failures} failure(s)")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
