@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""PreToolUse hook for the code-reviewer agent: runs each Bash command in an
+OS sandbox (sandbox-exec on macOS, bwrap on Linux).
+
+The hook reads the hook input (JSON) on stdin and rewrites the command
+(hookSpecificOutput.updatedInput) to `/usr/bin/env -i <vars> <sandbox>
+$SHELL -c <cmd>`. The sandbox can write only to the reviewer's scratch
+directory (TMPDIR) and has no network; see "bin/reviewer-guard" in
+review-kit/README.md for the full list and the limits.
+
+A command that is byte for byte this hook's own wrapper (a reissue in auto
+mode) passes through unchanged; anything else is wrapped. If no sandbox is
+available, or the agent id or scratch directory is unusable, the hook blocks
+the command (exit 2).
+"""
+import json
+import os
+import re
+import shlex
+import shutil
+import stat
+import sys
+import tempfile
+
+HOME = os.path.expanduser("~")
+# Files and dirs a reviewer never needs to read.
+SECRETS = [".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".config/gh",
+           ".config/hub", ".config/github-copilot", ".config/op",
+           ".config/git/credentials", ".netrc", ".git-credentials",
+           ".docker/config.json", ".claude/.credentials.json", ".claude.json",
+           ".claude.json.backup", ".claude/backups", ".codex/auth.json",
+           ".kube", ".npmrc", ".pypirc", ".pgpass", ".gem/credentials",
+           ".m2/settings.xml", ".gradle/gradle.properties",
+           ".cache/huggingface/token", ".vault-token", ".cargo/credentials",
+           ".cargo/credentials.toml", ".terraform.d", ".zsh_history",
+           ".zsh_sessions", ".bash_history",
+           # Shell startup files can export tokens; the sandbox's shells
+           # don't read them (zsh -f, non-interactive bash and sh).
+           ".zshenv", ".zshrc", ".zprofile", ".zlogin", ".bashrc",
+           ".bash_profile", ".profile"]
+# The sandbox starts from an empty environment plus these variables.
+KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "COLORTERM",
+            "TZ",
+            # Toolchain settings, so builds see the user's setup.
+            "GOPATH", "GOROOT", "GOFLAGS", "GOMODCACHE", "GOPRIVATE",
+            "GONOSUMDB", "GOTOOLCHAIN", "CARGO_HOME", "RUSTUP_HOME",
+            "RUSTUP_TOOLCHAIN", "JAVA_HOME", "VIRTUAL_ENV", "PYTHONPATH"}
+KEEP_ENV_PREFIX = "LC_"
+MACOS_NO_EXEC = ["/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl",
+                 "/usr/bin/security", "/usr/bin/shortcuts"]
+MACOS_NO_MACH = ["com.apple.SecurityServer", "com.apple.securityd",
+                 "com.apple.securityd.xpc",  # the keychain
+                 "com.apple.pasteboard.1",  # the clipboard
+                 "com.apple.windowserver", "com.apple.windowserver.active"]
+MACOS_DEV = ["/dev/null", "/dev/zero", "/dev/tty", "/dev/dtracehelper"]
+# Unix sockets in /tmp that lead to unsandboxed processes (Linux).
+LINUX_TMP_SOCKETS = re.compile(r"^(tmux-|ssh-|\.X11-unix$|\.ICE-unix$)")
+
+
+class Blocked(Exception):
+    pass
+
+
+def private_dir(path):
+    """Creates path (mode 700) and checks that only this user controls it.
+
+    Otherwise another user could plant a symlink that points the scratch
+    directory at a repo. The path is returned as given, not resolved: a
+    symlink swapped in after the check must not become the path the
+    profile allows (on macOS, writes through it are checked at its
+    target; on Linux, the scratch dir is a mount point the sandbox can't
+    replace)."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    st = os.lstat(path)
+    if (not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid()
+            or st.st_mode & 0o022):
+        raise Blocked(f"{path} is not a private directory owned by you")
+    return path
+
+
+def system_tool(path):
+    """Returns path if it is a root-owned file that only root can change.
+
+    The outer shell runs the wrapper's programs before any sandbox applies,
+    so they are named by absolute path, not looked up in PATH."""
+    if not path:
+        raise Blocked("sandbox tool not found")
+    path = os.path.realpath(path)
+    st = os.stat(path)
+    if st.st_uid != 0 or st.st_mode & 0o022:
+        raise Blocked(f"{path} is not a root-owned system file")
+    return path
+
+
+def write_file(path, content):
+    """Writes path unless it already holds content. Parallel hook runs for
+    one agent each use their own temp file."""
+    try:
+        with open(path) as f:
+            if f.read() == content:
+                return
+    except FileNotFoundError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path),
+                               prefix=os.path.basename(path) + ".")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def sbpl(path):
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def secret_paths():
+    return [os.path.realpath(os.path.join(HOME, s)) for s in SECRETS]
+
+
+def macos_profile(scratch):
+    rules = [
+        "(version 1)",
+        "(allow default)",
+        # Later rules win: deny every write, then allow scratch and the
+        # device files that shells and tools write.
+        "(deny file-write*)",
+        f"(allow file-write* (subpath {sbpl(scratch)})",
+        "  " + " ".join(f"(literal {sbpl(p)})" for p in MACOS_DEV),
+        '  (regex #"^/dev/fd/"))',
+        # Not the scratch dir itself: a command that could remove it and
+        # put a symlink there would steer the next profile's allow.
+        f"(deny file-write* (literal {sbpl(scratch)}))",
+        # macOS /bin/bash 3.2 (also /bin/sh) ignores TMPDIR for heredocs:
+        # it uses /var/tmp, which the sandbox can't write, and falls back to
+        # /tmp/sh-thd*, so only sandboxed shells write there. It checks that
+        # /tmp itself is writable first, hence the literal. Scripts run it
+        # whatever the user's shell is.
+        '(allow file-write* (literal "/private/tmp")'
+        ' (regex #"^/private/tmp/sh-thd[^/]*$"))',
+        # Includes loopback and unix sockets: Docker, ssh-agent, tmux.
+        "(deny network*)",
+        # Services that would act outside the sandbox for the command:
+        # Apple events, LaunchServices (open), launchd jobs, and cfprefsd
+        # (`defaults write` writes ~/Library/Preferences).
+        "(deny appleevent-send)",
+        "(deny lsopen)",
+        "(deny job-creation)",
+        "(deny user-preference-write)",
+        # Task ports of other processes (debugger attach).
+        "(deny mach-priv-task-port)",
+        "(deny mach-task-name)",
+        "(deny mach-lookup "
+        + " ".join(f"(global-name {sbpl(n)})" for n in MACOS_NO_MACH) + ")",
+        "(deny process-exec "
+        + " ".join(f"(literal {sbpl(p)})" for p in MACOS_NO_EXEC) + ")",
+        "(deny file-read* "
+        + " ".join(f"(subpath {sbpl(p)})" for p in secret_paths()) + ")",
+        # Signals only to processes in this sandbox.
+        "(deny signal)",
+        "(allow signal (target same-sandbox))",
+        "",
+    ]
+    return "\n".join(rules)
+
+
+def macos_argv(root, agent_id, scratch):
+    """Returns [sandbox argv]. The profile lives in the root, which the
+    sandbox can't write, so a command can't change it."""
+    profile = os.path.join(root, agent_id + ".sb")
+    write_file(profile, macos_profile(scratch))
+    return [[system_tool("/usr/bin/sandbox-exec"), "-f", profile]]
+
+
+def linux_masks():
+    """bwrap args that hide secrets and sockets to unsandboxed processes."""
+    masks = []
+    hide = secret_paths() + [os.path.join(HOME, ".docker", "run")]
+    try:
+        names = sorted(os.listdir("/tmp"))
+    except OSError as e:
+        raise Blocked(f"can't list /tmp to hide its sockets ({e})")
+    for n in names:
+        p = os.path.join("/tmp", n)
+        try:
+            sock = stat.S_ISSOCK(os.lstat(p).st_mode)
+        except FileNotFoundError:
+            continue  # removed since the listing
+        if sock or LINUX_TMP_SOCKETS.match(n):
+            hide.append(p)
+    for p in hide:
+        if os.path.isdir(p):
+            masks += ["--tmpfs", p]
+        elif os.path.lexists(p):
+            masks += ["--ro-bind", "/dev/null", p]
+    return masks
+
+
+def linux_argv(root, agent_id, scratch):
+    """Returns [argv, previous argv if any]. The masks follow /tmp, so the
+    argv is built fresh on each call and saved; a reissue may match the
+    argv of the call before it."""
+    argv = ([system_tool(shutil.which("bwrap")),
+             "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+             "--tmpfs", "/run", "--unshare-all", "--new-session",
+             "--die-with-parent"]
+            + linux_masks() + ["--bind", scratch, scratch])
+    saved = os.path.join(root, agent_id + ".bwrap")
+    try:
+        with open(saved) as f:
+            previous = json.load(f)
+    except FileNotFoundError:
+        previous = None
+    write_file(saved, json.dumps(argv))
+    return [argv] + ([previous] if previous else [])
+
+
+def env_argv(scratch, shell):
+    keep = sorted(n for n in os.environ
+                  if n in KEEP_ENV or n.startswith(KEEP_ENV_PREFIX))
+    return [system_tool("/usr/bin/env"), "-i"] + [
+        f"{n}={os.environ[n]}" for n in keep] + [
+        f"SHELL={shell}",
+        f"TMPDIR={scratch}",
+        f"TMPPREFIX={scratch}/zsh",  # zsh heredoc temp files
+        f"XDG_CACHE_HOME={scratch}/cache",
+        f"GOCACHE={scratch}/go-build",
+        "GOPROXY=off",  # no network: fail fast on a missing module
+        f"PIP_CACHE_DIR={scratch}/pip",
+        f"npm_config_cache={scratch}/npm",
+        "GIT_TERMINAL_PROMPT=0",
+    ]
+
+
+def wrapper(prefix, command):
+    return " ".join(shlex.quote(a) for a in prefix + [command])
+
+
+def main():
+    try:
+        data = json.load(sys.stdin)
+        tool_input = dict(data.get("tool_input") or {})
+        command = tool_input.get("command")
+        if not isinstance(command, str):
+            raise Blocked("no command in the hook input")
+        agent_id = data.get("agent_id")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", agent_id or ""):
+            raise Blocked(f"unusable agent id {agent_id!r}")
+        shell = os.environ.get("SHELL", "")
+        if (not os.path.isabs(shell)
+                or os.path.basename(shell) not in ("bash", "zsh", "sh")):
+            shell = "/bin/bash"
+        # Resolved once (/tmp is a symlink on macOS); the sandbox can't
+        # write the root, so nothing below it changes under the hook.
+        root = private_dir(os.path.join(os.path.realpath("/tmp"),
+                                        f"claude-reviewer-{os.getuid()}"))
+        scratch = private_dir(os.path.join(root, agent_id))
+        if sys.platform == "darwin":
+            sandboxes = macos_argv(root, agent_id, scratch)
+        elif sys.platform.startswith("linux"):
+            sandboxes = linux_argv(root, agent_id, scratch)
+        else:
+            raise Blocked(f"no sandbox for platform {sys.platform}")
+        env = env_argv(scratch, shell)
+        # The first is the current wrapper; others are accepted for reissues.
+        # zsh -f: skip ~/.zshenv, which could export tokens again.
+        flags = ["-f", "-c"] if os.path.basename(shell) == "zsh" else ["-c"]
+        prefixes = [env + sb + [shell] + flags for sb in sandboxes]
+        # A reissue passes through only if it is exactly what this hook
+        # emits. Comparing parsed tokens is not enough: the shell also
+        # runs $(...), redirects, and ; in a token that shlex keeps whole.
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            argv = []
+        for p in prefixes:
+            if argv and command == wrapper(p, argv[-1]):
+                return 0
+        tool_input["command"] = wrapper(prefixes[0], command)
+    except Blocked as e:
+        print(f"reviewer-guard: blocked: {e}. The reviewer's commands run "
+              "only inside a write sandbox.", file=sys.stderr)
+        return 2
+    except Exception as e:  # fail closed
+        print(f"reviewer-guard: blocked: internal error ({e!r})",
+              file=sys.stderr)
+        return 2
+    json.dump({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "updatedInput": tool_input,
+    }}, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

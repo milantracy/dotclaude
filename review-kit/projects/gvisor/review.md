@@ -186,6 +186,10 @@ Check the 7 benchmark questions in `REVIEW.md` Review 3.
 
 ## Build and test commands
 
+The coordinator runs these (Gate 4). The reviewer's sandbox has no Docker,
+no network, and no writable bazel output root, so a reviewer puts the
+targets in its `GATE4` plan instead of running them.
+
 - `bazel test //path/to:target`, or `make test TARGETS=//path/to:target` (Docker
   wrapper).
 - Syscall tests: `bazel test //test/syscalls:<name>_test_native` and
