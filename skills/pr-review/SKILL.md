@@ -106,7 +106,7 @@ verify, not context to trust.
 
 ## 4. Verify the findings
 
-Follow `coordinator.md`: build the ledger, handle free-range proposals, apply
+Follow `coordinator.md`: build the ledger, handle lens proposals, apply
 the four gates, and run Gate 4 with `<fork>` = the base from step 1,
 `<end>` = the head commit, and `Worktree: given <head worktree from step 1>`.
 Also:

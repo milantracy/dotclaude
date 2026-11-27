@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Review the changes we made with several independent reviewer subagents that start with no context, each with its own lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one (nits are settled without arguing), and start fresh reviewers each round (a smaller set after round 1) until the skill's stop rule is met (at most 5 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /shipme checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
+description: Review the changes we made with several independent reviewer subagents that start with no context, each with its own lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one (nits are settled without arguing), and start a small set of fresh reviewers for another round only when the fixes need one (at most 3 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /shipme checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
 argument-hint: "[base-ref | commit | range] [--delta <tree>] [--with-builtin]"
 ---
 
@@ -8,8 +8,8 @@ argument-hint: "[base-ref | commit | range] [--delta <tree>] [--with-builtin]"
 
 You are the **author** and the **coordinator**. You fix things or argue with
 evidence. The **reviewers** are fresh `code-reviewer` subagents that know
-nothing about this conversation, one per lens (or per merged pair of an
-overlay). Kit: `~/.claude/review-kit/`.
+nothing about this conversation, one per lens (or per merged group of
+lenses). Kit: `~/.claude/review-kit/`.
 Read these kit files first:
 - `overlays.md`: overlay detection.
 - `lenses.md`: the lens catalog, risk tiers, lens sets, and context per lens.
@@ -48,7 +48,7 @@ Read these kit files first:
 ## 2. Round 1: parallel blind pass
 
 Spawn all reviewers in one message (Agent tool, `subagent_type:
-"code-reviewer"`, one call per lens, or per merged pair of an overlay; its
+"code-reviewer"`, one call per lens, or per merged group; its
 `Lens:` form is in `lenses.md`, "Merged reviewers"). Each gets the base
 brief:
 
@@ -61,7 +61,16 @@ Tier: <Low | Medium | High>
 Checkout: <matches | differs>
 ```
 
-Add only what the context table in `lenses.md` (or the overlay) gives each lens.
+Add only what the context table in `lenses.md` (or the overlay) gives each lens
+(catch-all gets `Lenses this round: <labels>`).
+
+The rest of this section and section 3 describe round 1 of a full review.
+In a `--delta` review, round 1 uses the follow-up set (`lenses.md`): its
+correctness reviewer gets the fields below without the `Stage: blind`
+line, and the reveal text of section 3, in one brief, and you skip the
+reveal message. (`lenses.md`, "`--delta` mode" says when a delta needs a
+full review instead.)
+
 The **correctness** reviewer also gets:
 
 ```
@@ -103,7 +112,10 @@ With `--with-builtin`, also run the built-in reviewer each round (Skill tool,
 them yourself through the gates. Fix the ones that hold. Mark the others
 DROPPED, with the reason.
 
-Wait for all reviewers. Don't respond to findings yet.
+Wait for all reviewers. Don't respond to findings yet. Then do these in
+one message, so they run at the same time: the reveal (section 3, when the
+correctness reviewer ran blind), Gate 4 (section 4), and any proposed lens
+you start (`coordinator.md`).
 
 ## 3. Round 1: reveal (correctness only)
 
@@ -134,7 +146,7 @@ verified claim answers), problems in the description, and an `OPEN:` line.
 
 ## 4. Merge and verify
 
-Follow `coordinator.md`: build the ledger, handle free-range proposals, apply
+Follow `coordinator.md`: build the ledger, handle lens proposals, apply
 the four gates, and run Gate 4 with `<end>` = `T_k` (or the commit under
 review) and `<fork>` = the review base. In `--delta` mode, `<fork>` is the
 delta tree: the earlier full review's Gate 4 covers the rest of the change, so
@@ -172,29 +184,43 @@ disagreements" says what happens next.
 After fixes, rerun the affected build, tests, and lint. If a fix can change
 performance on a hot path, say that /shipme's benchmark gate applies.
 
-## 6. Rounds 2 to 5
+## 6. Later rounds
 
-Start **fresh** reviewers on the **full** diff `git diff <base> <T_k>`, with
-the same minimal context as round 1. Fresh reviewers don't anchor on the
-earlier rounds. Start only the **follow-up set** (defined in `lenses.md`,
-or the overlay's version), not the full set again.
+Most reviews end after round 1: the reviewer that found a problem checks
+its fix (CLOSED), and that is the fix's review.
 
-- The correctness reviewer gets the blind brief and then the reveal again,
-  with the updated reasoning.
+**Start another round only when** one of these holds:
+- A fix changed code or tests and no reviewer checked it: a fix that the
+  user decided, a fix for a finding with no reviewer (`gate4`, built-in),
+  or one whose reviewer failed. NIT fixes don't count.
+- The fixes go beyond the findings they answer: together they change the
+  approach, an interface or format, a lock, or a check on untrusted input,
+  or `git diff <T_k> <T_next>` changes more than about 50 lines outside
+  tests.
+- The fixes raise the risk tier (`lenses.md`, "Follow-up set").
+- The tier is High and the round fixed a BLOCKER or RED FLAG.
+
+If none holds, stop: findings that repeat settled ones, DISPUTED findings,
+NITs, and lens proposals don't start a round. If the fixes changed a test
+or the code that a Gate 4 target covers, run Gate 4 once more on the final
+tree first. List the DISPUTED and LEFT findings for the user.
+
+In a new round, start **fresh** reviewers on the **full** diff `git diff
+<base> <T_k>`. Fresh reviewers don't anchor on the earlier rounds. Start
+only the **follow-up set** (defined in `lenses.md`, or the overlay's
+version), not the full set again.
+
+- The correctness reviewer runs a single pass with the updated reasoning in
+  its brief, so the round has no reveal. `lenses.md`, "Follow-up set" has
+  the one exception (a blind pass and a reveal, as in sections 2 and 3).
 - Don't tell reviewers about earlier findings. Exception: if the same finding
   came up in two rounds in a row and was settled (REJECTED, DISPUTED, or LEFT;
   for a NIT, also DROPPED), add one line to that lens's brief:
   `Already settled: <claim>: <why>`.
 - Then repeat sections 4 and 5.
 
-**Start another round when** you changed code or tests after the round's
-reviewers read them (not counting NIT fixes), or when a new finding above NIT
-ended DISPUTED. Findings that repeat settled ones, NITs, and free-range
-proposals don't count. Otherwise stop, and list the DISPUTED and LEFT findings
-for the user.
-
-**Cap:** 5 rounds. If round 5 still leads to code or test changes, stop and
-ask the user how to proceed.
+**Cap:** 3 rounds. If round 3 still calls for another round, stop and ask
+the user how to proceed.
 
 ## 7. Escalate disagreements
 
@@ -209,8 +235,9 @@ finding, each standing on its own:
 
 Apply the decision. Treat the user's decision as final. Don't send it back to
 the reviewer. If the decision changes code, run Gate 4 and the affected
-build and tests, and start one more round if the cap allows. If it doesn't,
-say in the report that the decided fix had no fresh review.
+build and tests, and start one more round if section 6 calls for one and
+the cap allows. If the cap doesn't, say in the report that the decided fix
+had no fresh review.
 
 ## 8. Stamp and report
 
@@ -222,7 +249,7 @@ say in the report that the decided fix had no fresh review.
 - Report to the user:
   - Result: approved after k rounds, or approved with your decisions.
   - Risk tier. Lenses run each round; lenses **not** run and why (including
-    reviewers that failed twice and declined free-range proposals).
+    reviewers that failed twice and declined lens proposals).
   - Root cause: matched, or differed and how it was resolved.
   - Ledger, by outcome (`coordinator.md`):
     - FIXED, and why. Mark the NIT fixes: no reviewer checked them.

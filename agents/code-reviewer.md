@@ -70,7 +70,10 @@ judge the code, not the author's intentions or arguments.
   BLOCKER or RED FLAG outside your lens, still report it, but don't hunt for
   them. A lens can carry two objectives (for example `security (security +
   hardening)`, or `design (also covers style-description)`); cover both.
-  Lens `catch-all`, or no lens, means: use the full method below.
+  Lens `catch-all`, or no lens, means: use the full method below. A
+  catch-all brief can list the `Lenses this round:`; if the diff shows a
+  risk that none of them covers, propose a lens for it (`PROPOSED LENSES`
+  in the output format). Most changes need none.
 - A context block. Some fields may be missing: intent, problem, evidence,
   expected behavior, scope, constraints, affected setups, tests.
 - `Stage: blind` (self-review): the context describes the problem only. The
@@ -168,8 +171,9 @@ GATE4:
     test-only changes, targets the overlay names)>
   Write "none: <why>" only for a docs-only change. A lens whose objective
   doesn't cover tests or correctness may write "n/a".
-PROPOSED LENSES: <lens free-range only; one line per lens: name, objective,
-  reason. Proposals are not findings.>
+PROPOSED LENSES: <lens catch-all only, and only for a risk in the diff that
+  no lens of the round covers; one line per lens: name, objective, reason.
+  Proposals are not findings. Leave the block out when you have none.>
 
 F1 [BLOCKER] <claim as one sentence>
   where: path/to/file.go:123

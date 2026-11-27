@@ -16,10 +16,13 @@ how it differs.
   edit.
 - If a reviewer fails, start it again once. If it fails again, list it as not
   run, with the reason.
-- **free-range** proposals are not findings. They come in the reviewer's
-  `PROPOSED LENSES:` block. Start the proposed lenses that you agree with as a
-  second batch in the same round, and wait for them before Gate 4. Write each
-  proposal that you decline, and why, in the ledger.
+- **Lens proposals** are not findings. They come in the catch-all
+  reviewer's `PROPOSED LENSES:` block. Start a proposed lens only when it
+  names a risk in the diff that no reviewer of the round covered, as a
+  second batch in the same round. In self-review, start it right away,
+  alongside Gate 4 and the reveal (if the round has one). In pr-review,
+  wait for it before Gate 4 (see "Gate 4"). Write each proposal that you
+  decline, and why, in the ledger.
 - Give each reviewer only the context in the `lenses.md` table, or in the
   overlay's version of that table. **Don't give reviewers earlier findings**,
   so that they don't anchor on them. The only exception is self-review's
@@ -84,11 +87,25 @@ with the reason.
 
 ## Gate 4
 
-Reviewers are read-only, so the coordinator runs Gate 4, once per round,
-through the `fail-first-checker` agent. The agent runs the targets in a
-worktree with the change and with the production files reverted, and
-returns one verdict per target; the test logs stay in its context. Don't run
-it while a benchmark runs.
+Reviewers are read-only, so the coordinator runs Gate 4 each round,
+through the `fail-first-checker` agent. When to start it depends on the
+worktree it uses:
+- **A worktree of its own** (`create` or a reused `$W`: self-review): it
+  doesn't touch what the reviewers read. Start it as soon as the round's
+  first batch of reviewers has returned its `GATE4` plans, and don't wait
+  for it: send the reveal, start the second batch, and argue while it
+  runs. If a later plan (a second-batch reviewer, the reveal reply) adds a
+  target, run only that target afterwards. Collect its report before any
+  of these: another Gate 4 start (never two runs in one `$W`), the
+  decision to stop or to start a new round, the stamp, and the cleanup.
+- **A `given` worktree** (pr-review): it reverts the worktree that the
+  reviewers read. Start it only after every reviewer of the round has
+  returned, second batch included, and don't start or message a reviewer
+  until it has reported.
+
+The agent runs the targets in a worktree with the change and with the
+production files reverted, and returns one verdict per target; the test
+logs stay in its context. Don't run it while a benchmark runs.
 
 Inputs:
 - `<fork>`: what the change starts from. The skill gives it.
@@ -96,17 +113,14 @@ Inputs:
   series), or a tree hash from `review-stamp tree`.
 - `<targets>`: the union of the `must-fail` and `must-pass-both` lists in
   the `GATE4` plans, each with the finding or lens it came from (`overlay`
-  for a target the overlay requires). Use a `fallback` (the build or lint)
-  only when the change has no tests and touches no tested code (for
-  example, docs only), and say so.
+  for a target the overlay requires). When the change has no tests and touches no
+  tested code (for example, docs only), don't start the agent: run the
+  build or lint yourself, and say so.
 
 Start the agent (Agent tool, `subagent_type: "fail-first-checker"`) with
-the brief below (the agent's Inputs section defines each field), and wait
-for its report before you edit the checkout or message a reviewer (it may
-revert a worktree they read):
+the brief below (the agent's Inputs section defines each field):
 
 ```
-Action: run
 Repo: <abs path of the user's repository>
 Fork: <fork>
 End: <end>
@@ -118,7 +132,6 @@ Revert hunks: <file>: <which hunks or lines>   (from the plans, if any)
 Targets:
   must-fail: <target> (<source>) ...
   must-pass-both: <target> (<source>) ...
-  fallback: <build or lint command>   (only instead of the two lists)
 ```
 
 - **Worktree:** `create` on the first run; the report gives `$W`. Pass that
@@ -130,13 +143,15 @@ Targets:
   hunks or lines, or a given `Production files:` list) and start the agent
   again.
 - **Restore:** run the agent's step-3 restore yourself (`git -C $W reset
-  --hard && git -C $W clean -fd && rm -rf $W.gate4`) before you message a
-  reviewer or start the agent again, if any of these happens: the report
+  --hard && git -C $W clean -fd && rm -rf $W.gate4`) before you start or
+  message a reviewer or start the agent again, if any of these happens: the report
   says `Restore: FAILED`, the agent died before it reported, or it found a
   given worktree dirty.
-- **Cleanup:** when the review ends, start the agent with `Action:
-  cleanup`, `Repo`, `Overlay`, and `Worktree: <$W from the last report>`
-  (not for a given worktree). If a run died before it reported `$W`, look
+- **Cleanup:** when the review ends, remove `$W` yourself (not a given
+  worktree; no agent for this): check that the path contains
+  `review-gate4-`, run the overlay's worktree cleanup in it, then `git -C
+  <repo> worktree remove --force $W && rm -rf $W.gate4`. If a run died
+  before it reported `$W`, look
   for its worktree in `git -C <repo> worktree list` (a path containing
   `review-gate4-`, created during this review; macOS lists it under
   `/private/tmp`) and clean it up the same way. If another review may be
@@ -172,7 +187,8 @@ The agent defines what each verdict means. Map them to the ledger:
   ToolSearch `select:SendMessage` if needed), with your evidence or the fix.
 - A finding above NIT from a reviewer subagent is rejected only when its
   reviewer agrees (CLOSED).
-- Argue at most three exchanges per finding. If the finding is still OPEN, the
+- Argue at most two exchanges per finding, and put all of a reviewer's
+  findings in one message per exchange. If the finding is still OPEN, the
   skill decides what happens next.
 - If a finding is out of scope, give its reviewer more of the scope and intent.
 - If a finding above NIT repeats one that an earlier round settled, give the
