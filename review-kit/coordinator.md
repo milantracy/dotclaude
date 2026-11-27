@@ -42,17 +42,23 @@ answer each reviewer.
 Columns: `ID | lens(es) | severity | outcome | one-line note`. Outcomes:
 - FIXED.
 - REJECTED: the reviewer agreed that the finding doesn't hold.
-- DISPUTED: still open after the exchange limit, at any severity.
-- LEFT: a MINOR or NIT that was not fixed, and its reviewer agreed that it
-  can stay for now (CLOSED). Without that agreement it is DISPUTED. List it
+- DISPUTED: still open after the exchange limit. Any severity above NIT
+  (NITs are never argued).
+- LEFT: a finding that was not fixed and can stay for now. A MINOR needs
+  its reviewer's agreement (CLOSED); without it, the MINOR is DISPUTED. A
+  NIT needs no agreement: the coordinator decides. List every LEFT finding
   for the user.
-- DROPPED: a finding with no reviewer subagent behind it (for example, from
-  the built-in reviewer) that failed your check. Give the reason.
+- DROPPED: a finding that failed your check and that you may drop without a
+  reviewer's agreement: one with no reviewer subagent behind it (for
+  example, from the built-in reviewer), or a NIT. Give the reason.
 - DUPLICATE (pr-review): the finding repeats feedback that is already on the
   PR.
 - REPORTED (pr-review): the finding is verified and goes into the report.
 
 A finding counts as settled when it is REJECTED, DISPUTED, or LEFT.
+
+"Above NIT" means every finding but a NIT: BLOCKER, RED FLAG, MINOR, and
+QUESTION.
 
 ## Four gates
 
@@ -72,8 +78,9 @@ list the project's untrusted boundaries for Gate 1).
   that each build and pass tests.
 - **Gate 4, tests with and without the change:** see below.
 
-A finding that fails Gate 1, 2, or 3 isn't dropped silently. Argue it with its
-reviewer (see "Arguing").
+A finding above NIT that fails Gate 1, 2, or 3 isn't dropped silently. Argue
+it with its reviewer (see "Arguing"). A NIT that fails a gate is DROPPED,
+with the reason.
 
 ## Gate 4
 
@@ -158,12 +165,17 @@ The agent defines what each verdict means. Map them to the ledger:
 
 ## Arguing
 
+- NITs are never argued and never sent to a reviewer. A NIT that fails your
+  check is DROPPED. One that holds is FIXED or LEFT in self-review, and
+  REPORTED in pr-review.
 - Send each reviewer only its own findings, with SendMessage (load it with
   ToolSearch `select:SendMessage` if needed), with your evidence or the fix.
-- A finding from a reviewer subagent is rejected only when its reviewer
-  agrees (CLOSED).
+- A finding above NIT from a reviewer subagent is rejected only when its
+  reviewer agrees (CLOSED).
 - Argue at most three exchanges per finding. If the finding is still OPEN, the
   skill decides what happens next.
 - If a finding is out of scope, give its reviewer more of the scope and intent.
-- If a finding repeats one that an earlier round settled, give the reviewer the
-  earlier arguments and ask whether they still hold.
+- If a finding above NIT repeats one that an earlier round settled, give the
+  reviewer the earlier arguments and ask whether they still hold. A repeated
+  NIT that was LEFT or DROPPED takes its earlier outcome. One that was FIXED
+  is a new NIT: the fix did not work, so check it again.

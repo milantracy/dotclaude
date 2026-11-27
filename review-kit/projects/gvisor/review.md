@@ -3,29 +3,31 @@
 Used by the code-reviewer agent and by the coordinator in the self-review and
 pr-review skills.
 
-## Read the in-tree guidance first (source of truth)
+## Read the in-tree guidance for your lens (source of truth)
 
 Upstream maintains these files. Read them from the checkout under review; don't
-rely on memory. To save context, read only the parts that apply to the touched
-paths and to your lens.
+rely on memory. Read **only the sections listed for your lens**: find a
+section with Grep for its heading, then Read that range. If your `Lens:`
+field names two lenses (a merged reviewer, or a pr-review lens that "also
+covers" another), read the rows of both. If Grep doesn't find a heading,
+list the file's headings, read the closest one, and say so under CHECKED.
+Read another section only when a finding depends on it, and cite it.
 
-- `REVIEW.md`: **the upstream review rubric.** Use it as the checklist. Its
-  numbered reviews map to lenses (see "Lenses"). Its severity labels for kinds
-  of problems are floors (see "Severity").
-- `AGENTS.md`: compatibility codes (`COMPATIBILITY:*`), the PR checklist, rules
-  for comments and prose, and the "Adversarial review" section (the lens set
-  for our own changes).
-- `.gemini/styleguide.md`: the shorter guide that Gemini uses. Read its
-  checkpoint-compatibility rules (format versions, 12 months of backward
-  compatibility).
-- `CONTRIBUTING.md`: the Coding Guidelines section and the allowed
-  dependencies of `core` and `runsc`.
-- `SECURITY.md`: attacker prerequisites and impact categories, for changes to
-  the Sentry, gofer, seccomp, or host calls.
-- `.agents/skills/gvisor-performance/SKILL.md`: when the diff touches a hot
-  path listed in `AGENTS.md`.
-- `.agents/skills/gvisor-kernel-development/SKILL.md`: when the change modifies
-  kernel behavior.
+| Lens | Sections |
+|---|---|
+| every lens | `REVIEW.md` §1 "Core Principles". |
+| correctness | `REVIEW.md` Review 2. `AGENTS.md` "Modifying gVisor kernel behavior" and "Compatibility in practice" (the `COMPATIBILITY:*` codes). When the change touches save/restore: `AGENTS.md` "Filesystem checkpoint versioning" and the checkpoint rule in `.gemini/styleguide.md` "Priorities". When it modifies kernel behavior: `.agents/skills/gvisor-kernel-development/SKILL.md`. |
+| tests | `REVIEW.md` Review 2 (the test parts). `.gemini/styleguide.md` "Testing". |
+| design | `REVIEW.md` Review 1. `CONTRIBUTING.md` "Coding Guidelines" (it has the allowed dependencies of `core` and `runsc`). `.gemini/styleguide.md` "Coding guidelines". |
+| style-description | `AGENTS.md` "gVisor code conventions" and "Git / GitHub / PR Guidelines" (stop at "Buildkite CI results"). `REVIEW.md` Review 1 (naming, comments, description). `.gemini/styleguide.md` "Style". |
+| security, hardening | `REVIEW.md` Review 4. `SECURITY.md` "Security issue taxonomy" and "Attacker prerequisites". `AGENTS.md` "Security first". |
+| performance (also `performance-regression`, `performance-optimization`) | `REVIEW.md` Review 3. `AGENTS.md` "Performance sensitivity". `.gemini/styleguide.md` "Performance". When the diff touches a path listed there: `.agents/skills/gvisor-performance/SKILL.md`. |
+| concurrency | `REVIEW.md` Review 3 (the concurrency part). |
+| docs | Nothing more. |
+| catch-all | `REVIEW.md` §2 (Reviews 1 to 4). |
+| free-range | `AGENTS.md` "Important gVisor subpackages" and the agent list in "Adversarial review". |
+| any other lens (a free-range proposal) | The sections that the coordinator names in the `Lens:` objective. If it names none, list the headings of `REVIEW.md` and `AGENTS.md`, read the ones that match your objective, and say so under CHECKED. |
+| coordinator | `REVIEW.md` "Four-Gate Verification Filter", §3, and §4, and the title of each Review in §2 (the lens objectives). `AGENTS.md` "Performance sensitivity" (the hot paths, to choose the lenses), "Git / GitHub / PR Guidelines", and "Adversarial review". For a free-range proposal that you start, name its sections in the `Lens:` objective. |
 
 If a file is missing (old branch), read it from the default branch instead. If
 this overlay and an in-tree file disagree on what to check or on a severity,
@@ -54,6 +56,23 @@ the in-tree files:
 - **Gate failures are argued, not dropped.** `REVIEW.md` drops findings that
   fail Gates 1-3. The kit argues them with the reviewer first, which is the
   `AGENTS.md` rule ("do not reject a finding unless the sub-agent agrees").
+  NITs are the exception (below).
+- **Merged reviewers below the High tier.** `AGENTS.md` lists security and
+  security hardening, the two performance agents, and stylistic and
+  documentation as separate agents. Below High, the kit gives each pair to
+  one reviewer with both objectives (see "Lenses"). `AGENTS.md` itself says
+  to scale the number of sub-agents to the size and risk of the change.
+- **Smaller follow-up rounds.** `AGENTS.md` says that some agents must be
+  present for any change. The kit runs the full set in round 1 only (of a
+  `--delta` review too, for what the delta touches). Later rounds run the
+  follow-up set in `lenses.md`, so any agent but correctness and catch-all
+  (stylistic, free-range, testing, security, hardening, performance,
+  documentation) can be absent from them.
+- **NITs are not argued.** The coordinator settles each NIT without asking
+  its reviewer (`coordinator.md`, "Arguing"), and lists the ones it left
+  for the user.
+- **Sections, not whole files.** Each reviewer reads only the in-tree
+  sections for its lens (the table above).
 
 ## Risk tiers
 
@@ -77,14 +96,34 @@ and the matching objective from `AGENTS.md` or `REVIEW.md`.
 | security | security | any Sentry, gofer, `runsc`, or seccomp change |
 | security hardening | hardening | any Sentry, gofer, `runsc`, or seccomp change |
 | performance regression | performance, labeled `performance-regression` | any Sentry, gofer, or `runsc` change, or a hot path in `AGENTS.md` |
-| performance optimization | performance, labeled `performance-optimization` (a separate reviewer) | same as performance regression |
+| performance optimization | performance, labeled `performance-optimization` (a separate reviewer at the High tier) | same as performance regression |
 | documentation | docs | when the change can make docs wrong |
 | (`REVIEW.md` Review 1) | design | any change with non-test code |
 
 Add **concurrency** (`REVIEW.md` Review 3, concurrency part) when the change
 touches locks, wait queues, or goroutines. Run a conditional lens when its
-condition holds, at every tier. If you are not sure, run it. The "always"
-lenses also run in `--delta` mode.
+condition holds, at every tier. If you are not sure, run it.
+
+**Merged reviewers (self-review, Low and Medium tier):** when both lenses
+of a pair apply, start one reviewer for the pair (`lenses.md`, "Merged
+reviewers"):
+
+| Label | Lenses |
+|---|---|
+| `security` | security + hardening |
+| `performance` | `performance-regression` + `performance-optimization` |
+| `style-docs` | style-description + docs |
+
+At the High tier, start each lens as its own reviewer.
+
+**Rounds 2 to 5:** use the follow-up set in `lenses.md`, not the
+self-review lens table. Judge a lens's area by what the fix changes (the
+examples in `lenses.md`), not by the "When" column: a fix in a Sentry file
+doesn't by itself bring back the security or performance reviewers. The
+pairs stay merged below High.
+
+**`--delta` mode:** round 1 uses the self-review lens table, with the "When"
+column applied to the delta (`lenses.md`, "`--delta` mode").
 
 **pr-review** (other people's PRs): the protocol in `REVIEW.md` §2.
 
@@ -96,7 +135,9 @@ lenses also run in `--delta` mode.
 | Review 4: security and isolation boundaries | security (also covers hardening) |
 | unanchored catch-all | catch-all |
 
-Run all five at every tier. The tier sets the depth (for Low, the security
+Pass each lens as the table names it, for example `Lens: design (also covers
+style-description): <objective>`, so that the reviewer reads the sections of
+both. Run all five at every tier. The tier sets the depth (for Low, the security
 lens only confirms that no isolation boundary is affected). Add **docs** when
 the change alters behavior that the documentation describes.
 

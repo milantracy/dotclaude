@@ -6,7 +6,7 @@ argument-hint: "[benchmark targets or filter] [--base <ref>] [--plan-only]"
 
 # Benchmark (A/B)
 
-Kit: `~/.claude/review-kit/`. Detect the overlay from its `README.md` and read
+Kit: `~/.claude/review-kit/`. Detect the overlay from its `overlays.md` and read
 `projects/<name>/benchmark.md` when one exists. The overlay supplies the stats
 tool, the stop rule, the benchmark targets, and the build and run commands. It
 overrides the defaults below.

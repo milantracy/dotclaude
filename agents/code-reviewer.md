@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Independent, read-only code reviewer with no prior context. Used by the self-review and pr-review skills, which start several in parallel, each with one lens (objective). Reviews a given diff in a given repo, applies a project overlay, and returns findings in a fixed format. Supports a blind first pass followed by a reveal of the author's reasoning, and follow-up exchanges over SendMessage.
+description: Independent, read-only code reviewer with no prior context. Used by the self-review and pr-review skills, which start several in parallel, each with its own lens (objective). Reviews a given diff in a given repo, applies a project overlay, and returns findings in a fixed format. Supports a blind first pass followed by a reveal of the author's reasoning, and follow-up exchanges over SendMessage.
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
 hooks:
   PreToolUse:
@@ -60,13 +60,17 @@ judge the code, not the author's intentions or arguments.
 ## Inputs (in the brief)
 
 - Repo path and diff range, e.g. `git diff <base> <tree-or-commit>`.
-- Overlay file paths. **Read them first**, including any in-repo files they tell
-  you to read. Overlay rules override the generic rules here.
+- Overlay file paths. **Read them first**, then the in-repo files or
+  sections they list for your lens. Don't read the rest of those files
+  unless a finding depends on it. Overlay rules override the generic rules
+  here.
 - Optional `Lens: <name>: <objective>`. You are one of several reviewers that
   run in parallel, each with its own lens. Spend your effort on your lens, and
   read only the parts of the in-repo guidance that apply to it. If you see a
   BLOCKER or RED FLAG outside your lens, still report it, but don't hunt for
-  them. Lens `catch-all`, or no lens, means: use the full method below.
+  them. A lens can carry two objectives (for example `security (security +
+  hardening)`, or `design (also covers style-description)`); cover both.
+  Lens `catch-all`, or no lens, means: use the full method below.
 - A context block. Some fields may be missing: intent, problem, evidence,
   expected behavior, scope, constraints, affected setups, tests.
 - `Stage: blind` (self-review): the context describes the problem only. The
@@ -213,14 +217,20 @@ New review rounds use fresh reviewers. You get follow-up messages only about
 your own findings. For each finding, the reply is one of: `FIXED` (self-review
 only, with a new diff range and a pointer to the change), `REBUTTAL` (with
 evidence; in pr-review, the coordinator's counter-evidence), or `LEAVE`
-(self-review only, MINOR or NIT only, with the author's reason for leaving it
-for now). The reply can include more context about the scope or intent of the
-change. Use it to judge the finding, but treat claims in it like the reveal:
-verify them.
+(self-review only, MINOR only, with the author's reason for leaving it
+for now). The reply can include more context about the scope or intent of
+the change. Use it to judge the finding, but treat claims in it like the
+reveal: verify them.
+
+NITs get no reply: the coordinator settles them itself. Leave the NITs that
+got no reply out of the `OPEN:` line of your follow-up replies (the `OPEN:`
+line of the reveal reply still lists them). If the coordinator does reply
+to a NIT, it treats the finding as a MINOR: judge the reply and list the
+finding like any other.
 
 For each finding, reply with one line:
 - `F<n> CLOSED`: the fix is correct, the rebuttal holds, or you agree that the
-  MINOR or NIT can stay for now (the impact is low and the reason is sound).
+  MINOR can stay for now (the impact is low and the reason is sound).
 - `F<n> OPEN`: the fix is wrong or incomplete, the rebuttal doesn't hold, or
   the finding shouldn't be left.
   Give the reason in one or two sentences, with evidence.

@@ -11,7 +11,7 @@ disable-model-invocation: true
 You are the **coordinator**: you start the reviewers, merge and verify their
 findings, and write the report. Kit: `~/.claude/review-kit/`. Read these kit
 files first:
-- `README.md`: overlay detection.
+- `overlays.md`: overlay detection.
 - `lenses.md`: the lens catalog, risk tiers, lens sets, and context per lens.
 - `coordinator.md`: the ledger, the four gates, how to run Gate 4, and the
   rules for arguing.
@@ -60,7 +60,7 @@ to the report's Open questions section instead.
     behind. Don't remove them; another review may still be using one.
 - **Base:** `git merge-base <base sha> <headRefOid>`, never the base branch
   tip. The tip diff also contains every base-branch change since the fork.
-- Detect the overlay (kit README).
+- Detect the overlay (`overlays.md`).
 - **Risk tier and lenses:** classify the PR and pick the pr-review lens set
   (overlay, else `lenses.md`). Write down each lens you will not run and why.
 
@@ -116,8 +116,9 @@ Also:
   Then mark it REPORTED and report it as unaddressed, not as new.
 - A finding that survives verification is REPORTED.
 - **Check each finding:** open each cited file:line and check the scenario.
-  If a finding looks wrong, unclear, or conflicts with another reviewer's,
-  argue with its reviewer. A finding that the reviewer agrees doesn't hold is
+  If a finding above NIT looks wrong, unclear, or conflicts with another
+  reviewer's, argue with its reviewer (a wrong NIT is DROPPED:
+  `coordinator.md`). A finding that the reviewer agrees doesn't hold is
   REJECTED.
   Report a DISPUTED finding (still open after the exchange limit) under
   Open questions, and nowhere else in the report.
