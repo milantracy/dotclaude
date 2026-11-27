@@ -17,8 +17,20 @@ the author and verifies each claim. In follow-up exchanges, it examines the
 reply to each of its own findings: a fix, a rebuttal, or a request to leave the
 finding. It accepts a rebuttal only when the rebuttal has evidence. It cannot
 revert the change, so it writes a plan (`GATE4`) of the tests that must fail
-without the change. The coordinator runs that plan. The `self-review` and
-`pr-review` skills use this agent.
+without the change. The coordinator runs that plan through the
+`fail-first-checker` agent. The `self-review` and `pr-review` skills use
+the reviewer agent.
+
+### `~/.claude/agents/fail-first-checker.md`
+
+This file defines the agent that checks that a change's tests fail without
+the change and pass with it (Gate 4 of the review skills). It gets the
+change, its base, and the reviewers' `GATE4` plans. In a separate
+worktree (for pr-review, the head worktree) it runs the targets with the
+change and with the production files reverted, then restores the worktree.
+It returns a table of each target's result both ways and a verdict, so the
+test logs don't fill the coordinator's context. It never touches the repo's
+own checkout.
 
 ### `~/.claude/skills/self-review/SKILL.md`
 
@@ -76,8 +88,9 @@ objectives.
 ### `coordinator.md`
 
 This file contains the rules that both review skills use as coordinator: the
-ledger, the four gates, the Gate 4 steps, and the rules for arguing with a
-reviewer. Each skill states only how it differs.
+ledger, the four gates, how to run Gate 4 with the `fail-first-checker`
+agent and read its results, and the rules for arguing with a reviewer. Each
+skill states only how it differs.
 
 ### `bin/review-stamp`
 
@@ -149,7 +162,8 @@ Limits:
 - Builds and tests that write outside `$TMPDIR` (bazel, `go build` without
   `-o`), download dependencies, use Docker (`make test` in gVisor), or open
   local sockets (Go `httptest`) fail. The reviewer reports such a command
-  instead of running it; the coordinator runs builds and tests in Gate 4.
+  instead of running it; Gate 4 runs builds and tests in the
+  `fail-first-checker` agent, outside the sandbox.
 - In auto mode, the first try of each reviewer command is refused because
   the hook changed it, and the reviewer resends the rewritten command. Each
   command costs two tool calls. The hook doesn't approve commands itself

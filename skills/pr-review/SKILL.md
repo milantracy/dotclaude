@@ -11,8 +11,8 @@ findings, and write the report. Kit: `~/.claude/review-kit/`. Read these kit
 files first:
 - `README.md`: overlay detection.
 - `lenses.md`: the lens catalog, risk tiers, lens sets, and context per lens.
-- `coordinator.md`: the ledger, the four gates, Gate 4 steps, and the rules
-  for arguing.
+- `coordinator.md`: the ledger, the four gates, how to run Gate 4, and the
+  rules for arguing.
 
 The review method is in the `code-reviewer` agent. Overlays are in
 `review-kit/projects/<name>/review.md`.
@@ -82,7 +82,8 @@ verify, not context to trust.
 
 Follow `coordinator.md`: build the ledger, handle free-range proposals, apply
 the four gates, and run Gate 4 with `<fork>` = the base from step 1,
-`<end>` = the head commit, and `$W` = the head worktree from step 1. Also:
+`<end>` = the head commit, and `Worktree: given <head worktree from step 1>`.
+Also:
 
 - **Feedback already on the PR:** mark a finding that repeats it DUPLICATE
   and leave it out of the report, unless that feedback is still unaddressed.
