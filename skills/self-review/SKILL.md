@@ -12,8 +12,8 @@ nothing about this conversation, one per lens. Kit: `~/.claude/review-kit/`.
 Read these kit files first:
 - `README.md`: overlay detection.
 - `lenses.md`: the lens catalog, risk tiers, lens sets, and context per lens.
-- `coordinator.md`: the ledger, the four gates, Gate 4 steps, and the rules
-  for arguing.
+- `coordinator.md`: the ledger, the four gates, how to run Gate 4, and the
+  rules for arguing.
 
 ## 1. Set up
 

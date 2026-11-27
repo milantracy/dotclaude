@@ -165,7 +165,7 @@ nits.
   matches Linux.
 - Gate 4 test files: `*_test.go`, everything under `test/`, and `BUILD`
   files count as tests (don't revert them). If a `BUILD` file also changes a
-  production rule, revert that hunk by hand.
+  production rule, revert that hunk too.
 
 ## Performance claims
 
@@ -186,9 +186,10 @@ Check the 7 benchmark questions in `REVIEW.md` Review 3.
 
 ## Build and test commands
 
-The coordinator runs these (Gate 4). The reviewer's sandbox has no Docker,
-no network, and no writable bazel output root, so a reviewer puts the
-targets in its `GATE4` plan instead of running them.
+The coordinator runs these (in Gate 4, through the `fail-first-checker`
+agent). The reviewer's sandbox has no Docker, no network, and no writable
+bazel output root, so a reviewer puts the targets in its `GATE4` plan
+instead of running them.
 
 - `bazel test //path/to:target`, or `make test TARGETS=//path/to:target` (Docker
   wrapper).

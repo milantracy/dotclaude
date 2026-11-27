@@ -23,4 +23,6 @@ again at any time.
 - `skills/pr-review/`: reviews pull requests from other persons.
 - `skills/benchmark/`: measures the performance effect of a change (A/B).
 - `agents/code-reviewer.md`: the independent reviewer agent.
+- `agents/fail-first-checker.md`: the Gate 4 agent of the review skills
+  (it checks that a change's tests fail without it and pass with it).
 - `review-kit/`: shared parts and project overlays. See `review-kit/README.md`.

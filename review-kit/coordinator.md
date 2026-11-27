@@ -75,72 +75,86 @@ reviewer (see "Arguing").
 
 ## Gate 4
 
-Reviewers are read-only, so the coordinator runs Gate 4, once per round. Don't
-run it while a benchmark runs.
+Reviewers are read-only, so the coordinator runs Gate 4, once per round,
+through the `fail-first-checker` agent. The agent runs the targets in a
+worktree with the change and with the production files reverted, and
+returns one verdict per target; the test logs stay in its context. Don't run
+it while a benchmark runs.
 
 Inputs:
 - `<fork>`: what the change starts from. The skill gives it.
 - `<end>`: what is under review. A commit (pr-review head, or one commit of a
   series), or a tree hash from `review-stamp tree`.
 - `<targets>`: the union of the `must-fail` and `must-pass-both` lists in
-  the `GATE4` plans. Fall back to the build or lint only when the change has
-  no tests and touches no tested code (for example, docs only), and say so.
+  the `GATE4` plans, each with the finding or lens it came from (`overlay`
+  for a target the overlay requires). Use a `fallback` (the build or lint)
+  only when the change has no tests and touches no tested code (for
+  example, docs only), and say so.
 
-Steps (shell state doesn't persist between tool calls: record the literal
-values of `C` and `W`, and substitute them in later commands):
+Start the agent (Agent tool, `subagent_type: "fail-first-checker"`) with
+the brief below (the agent's Inputs section defines each field), and wait
+for its report before you edit the checkout or message a reviewer (it may
+revert a worktree they read):
 
 ```
-# If <end> is a commit:
-C=<end>
-# If <end> is a tree (no ref, no index change):
-C=$(git commit-tree <end> -p HEAD -m review)
-# Worktree: create it on the first run of the review, then reuse it.
-W=$(mktemp -d /tmp/review-gate4-XXXXXX)
-git worktree add --detach $W $C
-#   later rounds: git -C $W checkout --detach --force $C && git -C $W clean -fd
-# 1. Run <targets> in $W with the overlay's test command
-#    (else the repo's usual one).
-git -C $W diff --binary --no-renames <fork> $C -- <production files> \
-  > $W.patch
-git -C $W apply -R $W.patch              # must succeed
-git -C $W status --porcelain             # must not be empty
-# 2. Run <targets> again.
-# 3. Restore $W right away, every round, even if step 2 failed:
-git -C $W checkout --detach --force $C && git -C $W clean -fd && rm -f $W.patch
-# 4. Once, when the review ends: run the overlay's worktree cleanup in $W,
-#    then remove it.
-git worktree remove --force $W
+Action: run
+Repo: <abs path of the user's repository>
+Fork: <fork>
+End: <end>
+Worktree: create | <$W from an earlier round> | given <path>
+Overlay: <abs path(s), or "none">
+Test command: <the overlay's, else the repo's usual one>
+Production files: compute   (or a list, only to fix a plan problem)
+Revert hunks: <file>: <which hunks or lines>   (from the plans, if any)
+Targets:
+  must-fail: <target> (<source>) ...
+  must-pass-both: <target> (<source>) ...
+  fallback: <build or lint command>   (only instead of the two lists)
 ```
 
-Production files are the changed files that aren't tests. List them with
-`git diff --name-only --no-renames <fork> $C`, so that a renamed file appears
-under both its old and its new path. If the overlay says how to tell tests
-apart, use that. Pass each path as its own argument (in zsh, an unquoted
-variable is one argument).
-
-- **Test-only change** (no production files): skip the revert and step 2;
-  with an empty path list the diff would revert the tests too. The targets
-  must pass with the change.
-- **Failed revert:** if the patch is empty, `apply` fails, or `status` shows no
-  change, don't run step 2. Run step 3, then fix the plan.
-- **Existing worktree:** a skill can give an existing worktree of `<end>` as
-  `$W` (pr-review gives its head worktree, which the reviewers also read). Skip
-  `worktree add` and step 4. Don't message reviewers between the revert and
-  step 3, so that no one reads the reverted tree.
-
-Reusing one worktree lets later rounds reuse the build output.
-
-Results:
-- New and changed tests must fail without the change, for the expected
-  reason, and pass with it. Refactors must pass both ways. An overlay can
-  name targets that must pass both ways.
-- A BLOCKER (source `gate4`): a target that fails with the change, or a new
-  test that passes without the production change it claims to test.
-- A failure without the change for an unrelated reason (setup, a build error
-  in code the change doesn't touch) proves nothing. Fix the plan and run it
+- **Worktree:** `create` on the first run; the report gives `$W`. Pass that
+  path in later rounds, so they reuse the build output. pr-review gives its
+  head worktree as `given <path>` (the reviewers read it too). If that
+  worktree is at the wrong commit (pr-review after a force-push), move it
+  to `<end>` first with `git -C <path> checkout --detach --force <end>`.
+- **Plan problems:** the report lists them (a failed revert, a missing
+  target, mixed test and production hunks it couldn't split, an unrelated
+  failure). Fix the plan (for example with `Revert hunks:`, which can name
+  hunks or lines, or a given `Production files:` list) and start the agent
   again.
-- A build failure because a test uses a symbol that the change adds counts as
-  the expected failure. Say so in the ledger.
+- **Restore:** run the agent's step-3 restore yourself (`git -C $W reset
+  --hard && git -C $W clean -fd && rm -rf $W.gate4`) before you message a
+  reviewer or start the agent again, if any of these happens: the report
+  says `Restore: FAILED`, the agent died before it reported, or it found a
+  given worktree dirty.
+- **Cleanup:** when the review ends, start the agent with `Action:
+  cleanup`, `Repo`, `Overlay`, and `Worktree: <$W from the last report>`
+  (not for a given worktree). If a run died before it reported `$W`, look
+  for its worktree in `git -C <repo> worktree list` (a path containing
+  `review-gate4-`, created during this review; macOS lists it under
+  `/private/tmp`) and clean it up the same way. If another review may be
+  running in the same repo, ask the user before you remove it.
+- If the agent fails twice, follow its steps
+  (`~/.claude/agents/fail-first-checker.md`) yourself and say so in the
+  report.
+
+The agent defines what each verdict means. Map them to the ledger:
+- `OK` for every target: Gate 4 passes. For each must-fail row that ran
+  without the change (not `skipped`), check that its failure excerpt
+  matches what its finding expects; if not, treat the row as `PLAN`. Copy
+  the agent's notes (such as "uses a new symbol") into the ledger.
+- `FAILS-WITH-CHANGE` or `PASSES-WITHOUT`: a BLOCKER, source `gate4`.
+- `BROKE-WITHOUT`: a RED FLAG at least, source `gate4`. Send it to the
+  reviewer whose plan named the target; for an `overlay` target, check it
+  yourself.
+- `PLAN`: fix the plan and run it again, with only the `PLAN` targets and
+  the ones the fix affects. A target with the note "same build unit as a
+  new test" can't run without the change: drop a must-pass-both one from
+  the plan and say so in the ledger; record a must-fail one as unproven
+  (below). If no plan fix applies (for example the target is flaky or
+  broken at the fork), don't rerun: record the row as unproven in the
+  ledger, and give it to the target's reviewer, or to the user for an
+  `overlay` target.
 
 ## Arguing
 
