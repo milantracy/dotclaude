@@ -125,9 +125,8 @@ Wait for all reviewers. Don't respond to findings yet.
 
 ## 3. Round 1: reveal (correctness only)
 
-Continue **the correctness reviewer** with SendMessage (load it with
-ToolSearch `select:SendMessage` if needed). Send your reasoning, honestly and
-completely:
+Continue **the correctness reviewer** with SendMessage. Send your reasoning,
+honestly and completely:
 
 ```
 Reveal.

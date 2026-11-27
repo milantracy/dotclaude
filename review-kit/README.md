@@ -67,8 +67,12 @@ worktree. It starts one reviewer agent per lens, in parallel. Then it merges the
 findings, removes feedback that is already on the pull request, and checks each
 finding with the four gates. It removes the incorrect findings. It writes a
 report with a verdict and a draft review comment for each finding. If an earlier
-report exists, it gives the status of each earlier problem. It posts comments
-only when the user tells it to post.
+report exists, it gives the status of each earlier problem. It runs forked in
+the background, so its work stays out of the main session, and it returns a
+short summary (verdict, blockers, open questions) and the report path. A
+second `/pr-review` started while one runs waits in the foreground. It never
+posts; the user posts the comments from the main session. It runs only when
+the user types `/pr-review`.
 
 ### `~/.claude/skills/benchmark/SKILL.md`
 
