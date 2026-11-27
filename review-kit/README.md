@@ -10,8 +10,8 @@ This file defines the reviewer agent. The reviewer starts with no context. It
 reads the diff, the code around the diff, and the project overlay. It does not
 change files, and no overlay can change that rule. Each instance can get a lens:
 an objective, such as security or tests. The review skills start several
-instances in parallel, one per lens (an overlay can merge two lenses into
-one reviewer). Each reviewer reports each problem with a severity, a
+instances in parallel, one per lens (a lens set can merge lenses into one
+reviewer). Each reviewer reports each problem with a severity, a
 location, and a failure scenario. In a blind review, it first finds the root
 cause without the author's reasoning. Then it reads the reasoning of the
 author and verifies each claim. In follow-up exchanges, it examines the
@@ -43,9 +43,11 @@ alternatives, and draft commit message, and verifies each claim. We merge the
 findings and check them with four gates. Gate 4 runs the tests with and without
 the change, in a separate worktree. We fix each problem or argue with its
 reviewer. We reject a reviewer's finding only when that reviewer agrees; we
-settle NITs ourselves. Each new round starts fresh reviewers on the full
-change, but only for the follow-up lens set (`lenses.md`). The skill defines
-when the loop stops and which disputes go to the user. At the end, the skill
+settle NITs ourselves. The reviewer that found a problem checks its fix.
+A new round starts only when the fixes need a fresh look (at most 3
+rounds); it starts fresh reviewers on the full change, but only for the
+follow-up lens set (`lenses.md`). The skill defines which disputes go to
+the user. At the end, the skill
 writes a review stamp. `series.md` in the skill's directory has the rules
 for reviewing one commit of a series.
 
@@ -89,7 +91,7 @@ configuration. It gives the commands to the user instead.
 
 This file lists the lenses, the risk tiers, and the default lens set for each
 tier. It also defines the smaller follow-up set for later rounds, the rule
-for `--delta` reviews, how an overlay merges two lenses into one reviewer,
+for `--delta` reviews, how lenses merge into one reviewer,
 and how much context each lens gets in each skill. A project overlay can
 replace the tiers, the lens sets, the context, and the objectives.
 

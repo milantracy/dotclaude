@@ -8,8 +8,8 @@ pr-review skills.
 Upstream maintains these files. Read them from the checkout under review; don't
 rely on memory. Read **only the sections listed for your lens**: find a
 section with Grep for its heading, then Read that range. If your `Lens:`
-field names two lenses (a merged reviewer, or a pr-review lens that "also
-covers" another), read the rows of both. If Grep doesn't find a heading,
+field names more than one lens (a merged reviewer, or a pr-review lens
+that "also covers" another), read the rows of each. If Grep doesn't find a heading,
 list the file's headings, read the closest one, and say so under CHECKED.
 Read another section only when a finding depends on it, and cite it.
 
@@ -24,10 +24,9 @@ Read another section only when a finding depends on it, and cite it.
 | performance (also `performance-regression`, `performance-optimization`) | `REVIEW.md` Review 3. `AGENTS.md` "Performance sensitivity". `.gemini/styleguide.md` "Performance". When the diff touches a path listed there: `.agents/skills/gvisor-performance/SKILL.md`. |
 | concurrency | `REVIEW.md` Review 3 (the concurrency part). |
 | docs | Nothing more. |
-| catch-all | `REVIEW.md` §2 (Reviews 1 to 4). |
-| free-range | `AGENTS.md` "Important gVisor subpackages" and the agent list in "Adversarial review". |
-| any other lens (a free-range proposal) | The sections that the coordinator names in the `Lens:` objective. If it names none, list the headings of `REVIEW.md` and `AGENTS.md`, read the ones that match your objective, and say so under CHECKED. |
-| coordinator | `REVIEW.md` "Four-Gate Verification Filter", §3, and §4, and the title of each Review in §2 (the lens objectives). `AGENTS.md` "Performance sensitivity" (the hot paths, to choose the lenses), "Git / GitHub / PR Guidelines", and "Adversarial review". For a free-range proposal that you start, name its sections in the `Lens:` objective. |
+| catch-all | `REVIEW.md` §2 (Reviews 1 to 4). To propose a lens: the agent list in `AGENTS.md` "Adversarial review". |
+| any other lens (a catch-all proposal) | The sections that the coordinator names in the `Lens:` objective. If it names none, list the headings of `REVIEW.md` and `AGENTS.md`, read the ones that match your objective, and say so under CHECKED. |
+| coordinator | `REVIEW.md` "Four-Gate Verification Filter", §3, and §4, and the title of each Review in §2 (the lens objectives). `AGENTS.md` "Performance sensitivity" (the hot paths, to choose the lenses), "Git / GitHub / PR Guidelines", and "Adversarial review". For a lens proposal that you start, name its sections in the `Lens:` objective. |
 
 If a file is missing (old branch), read it from the default branch instead. If
 this overlay and an in-tree file disagree on what to check or on a severity,
@@ -59,15 +58,27 @@ the in-tree files:
   NITs are the exception (below).
 - **Merged reviewers below the High tier.** `AGENTS.md` lists security and
   security hardening, the two performance agents, and stylistic and
-  documentation as separate agents. Below High, the kit gives each pair to
-  one reviewer with both objectives (see "Lenses"). `AGENTS.md` itself says
-  to scale the number of sub-agents to the size and risk of the change.
-- **Smaller follow-up rounds.** `AGENTS.md` says that some agents must be
-  present for any change. The kit runs the full set in round 1 only (of a
-  `--delta` review too, for what the delta touches). Later rounds run the
-  follow-up set in `lenses.md`, so any agent but correctness and catch-all
-  (stylistic, free-range, testing, security, hardening, performance,
-  documentation) can be absent from them.
+  documentation as separate agents. Below High, the kit gives each group
+  (at Medium also with design and concurrency) to one reviewer with all
+  its objectives (see "Lenses"). `AGENTS.md` itself
+  says to scale the number of sub-agents to the size and risk of the change.
+- **No free-range agent.** `AGENTS.md` starts one for any change. The kit
+  lets the catch-all reviewer propose missing lenses instead
+  (`lenses.md`), so a round has no reviewer whose only output is more
+  reviewers. For that, catch-all also gets the list of the round's
+  lenses.
+- **Three reviewers at the Low tier.** `AGENTS.md` says that some agents
+  must be present for any change, and `REVIEW.md` §2 has four reviews. At
+  Low, self-review starts only the Low set below, whatever files the
+  change touches, and pr-review leaves out Review 3 and Review 4 (see
+  "Lenses").
+- **Fewer and smaller follow-up rounds.** The kit starts another round only
+  when the fixes need one (the self-review skill, "Later rounds"), and
+  that round, like every round of a `--delta` review, runs the follow-up
+  set in `lenses.md`: one correctness reviewer plus the lenses that the
+  fixes touch. That reviewer also covers catch-all and gets our reasoning
+  in its brief, so those rounds have no separate, minimal-context
+  catch-all agent.
 - **NITs are not argued.** The coordinator settles each NIT without asking
   its reviewer (`coordinator.md`, "Arguing"), and lists the ones it left
   for the user.
@@ -91,7 +102,7 @@ and the matching objective from `AGENTS.md` or `REVIEW.md`.
 | correctness | correctness | always |
 | stylistic | style-description | always |
 | catch-all | catch-all | always |
-| free-range | free-range | always |
+| free-range | (none: catch-all proposes lenses) | never |
 | testing exhaustivity | tests | unless the change only touches tests, build infra, or docs |
 | security | security | any Sentry, gofer, `runsc`, or seccomp change |
 | security hardening | hardening | any Sentry, gofer, `runsc`, or seccomp change |
@@ -101,29 +112,37 @@ and the matching objective from `AGENTS.md` or `REVIEW.md`.
 | (`REVIEW.md` Review 1) | design | any change with non-test code |
 
 Add **concurrency** (`REVIEW.md` Review 3, concurrency part) when the change
-touches locks, wait queues, or goroutines. Run a conditional lens when its
-condition holds, at every tier. If you are not sure, run it.
+touches locks, wait queues, or goroutines.
 
-**Merged reviewers (self-review, Low and Medium tier):** when both lenses
-of a pair apply, start one reviewer for the pair (`lenses.md`, "Merged
-reviewers"):
+The table says which lenses apply; if you are not sure that a condition
+holds, it holds. The tier says how many reviewers carry them (`lenses.md`,
+"Merged reviewers"):
 
-| Label | Lenses |
-|---|---|
-| `security` | security + hardening |
-| `performance` | `performance-regression` + `performance-optimization` |
-| `style-docs` | style-description + docs |
+- **Low: 3 reviewers.** correctness, `style-docs` (style-description +
+  docs), and catch-all. The "When" column doesn't add more at this tier:
+  catch-all confirms that no isolation boundary or hot path is affected.
+  If it reports that one is, the tier is not Low: classify again and
+  start the missing reviewers of the new tier as a second batch.
+- **Medium: at most 6.** correctness, catch-all, tests (if its condition
+  holds), and one reviewer for each group below that has a lens whose
+  condition holds:
 
-At the High tier, start each lens as its own reviewer.
+  | Label | Lenses |
+  |---|---|
+  | `design` | design + style-description + docs |
+  | `security` | security + hardening |
+  | `performance` | `performance-regression` + `performance-optimization` + concurrency |
 
-**Rounds 2 to 5:** use the follow-up set in `lenses.md`, not the
+- **High:** each lens whose condition holds as its own reviewer.
+
+**Later rounds:** use the follow-up set in `lenses.md`, not the
 self-review lens table. Judge a lens's area by what the fix changes (the
 examples in `lenses.md`), not by the "When" column: a fix in a Sentry file
 doesn't by itself bring back the security or performance reviewers. The
-pairs stay merged below High.
+groups stay merged below High.
 
-**`--delta` mode:** round 1 uses the self-review lens table, with the "When"
-column applied to the delta (`lenses.md`, "`--delta` mode").
+**`--delta` mode:** every round uses the follow-up set, applied to the
+delta (`lenses.md`, "`--delta` mode").
 
 **pr-review** (other people's PRs): the protocol in `REVIEW.md` §2.
 
@@ -137,8 +156,10 @@ column applied to the delta (`lenses.md`, "`--delta` mode").
 
 Pass each lens as the table names it, for example `Lens: design (also covers
 style-description): <objective>`, so that the reviewer reads the sections of
-both. Run all five at every tier. The tier sets the depth (for Low, the security
-lens only confirms that no isolation boundary is affected). Add **docs** when
+both. Run all five at the Medium and High tiers. At Low, run three: design,
+correctness, and catch-all, which confirms that no isolation boundary or
+hot path is affected. If it reports that one is, the tier is not Low:
+classify again and start the other two as a second batch. Add **docs** when
 the change alters behavior that the documentation describes.
 
 Context override for pr-review: the design lens gets the PR description and

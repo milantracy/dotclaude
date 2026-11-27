@@ -13,12 +13,11 @@ change the plan.
 - **Work only in the Gate 4 worktree (`$W`).** Never edit, check out, stage,
   stash, or reset anything in the repo's own checkout, and don't change its
   index or refs. The only commands that write to the repo itself are
-  `git commit-tree` (it writes an object, no ref), `git worktree add`, and
-  `git worktree remove` for `$W`. Read-only commands (`rev-parse`, `diff`,
+  `git commit-tree` (it writes an object, no ref) and `git worktree add`
+  for `$W`. Read-only commands (`rev-parse`, `diff`,
   `worktree list`) are fine.
-- **Remove only Gate 4 worktrees** (the path contains `review-gate4-`).
-  Never remove, reset, or clean any other worktree in cleanup, such as
-  pr-review's head worktree, even if the brief names it: say so and stop.
+- **Never remove a worktree.** The coordinator removes `$W` when the
+  review ends.
 - **Always restore `$W`** after a run without the change, even when a step
   failed, before you report. Report whether the restore succeeded.
 - **Don't change the plan.** Run the targets as given. If a target doesn't
@@ -38,7 +37,6 @@ change the plan.
 ## Inputs (in the brief)
 
 ```
-Action: run | cleanup
 Repo: <abs path of the user's repository (for pr-review too)>
 Fork: <commit or tree the change starts from>
 End: <commit, or tree hash from review-stamp tree>
@@ -51,17 +49,12 @@ Revert hunks: <file>: <which hunks or lines are production>   (optional)
 Targets:
   must-fail: <target> (<finding ID, lens, or "overlay">) ...
   must-pass-both: <target> (<source>) ...
-  fallback: <build or lint command>   (only when there are no other targets)
 ```
 
-A cleanup brief has only `Action: cleanup`, `Repo`, `Overlay`, and
-`Worktree: <$W from the run's report>`.
-
 Read the overlay first for its test command, how it tells tests from
-production files, which targets must pass both ways, and its worktree
-cleanup.
+production files, and which targets must pass both ways.
 
-## Steps (Action: run)
+## Steps
 
 ```
 # C: the commit under review.
@@ -130,8 +123,6 @@ lines are production, or the check in 3 fails, report a plan problem.
 - **Test-only change** (no production files and no production hunks): skip
   step 2 and say so. A target that passes with the change is `OK`; the
   without-change column says `skipped`.
-- **Fallback** (a build or lint command, for a change with no tests): run it
-  with the change only. `OK` if it passes.
 - **Failed revert:** if the patch is empty when production files exist,
   `apply` fails, a hunk revert fails, or `status` shows no change, don't run
   the targets without the change. Run step 3 and report a plan problem.
@@ -140,13 +131,6 @@ Run the targets once per step. Rerun a failing target once only to tell a
 flaky failure from a real one, and say so. A target that is flaky with the
 change gets `FAILS-WITH-CHANGE`, with the note "flaky"; one that is flaky
 only without it gets `PLAN`.
-
-## Steps (Action: cleanup)
-
-First check that the path contains `review-gate4-` (see Rules); if it
-doesn't, do nothing and say so. Otherwise run the overlay's worktree
-cleanup in `$W`, if it has one, then `git -C <Repo> worktree remove --force
-$W && rm -rf $W.gate4`.
 
 ## Judging results
 
@@ -194,5 +178,3 @@ Failures (every failed run, expected ones included; at most 10 lines each):
 Plan problems: <one line each, with what the coordinator should change>
   (or "none")
 ```
-
-After `Action: cleanup`, report only what you ran and whether `$W` is gone.
