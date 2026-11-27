@@ -1,7 +1,8 @@
 # Review lenses
 
 A lens is the objective of one `code-reviewer` instance. The self-review and
-pr-review skills start several reviewers in parallel, one per lens. The
+pr-review skills start several reviewers in parallel, one per lens (an
+overlay can give two lenses to one reviewer; see "Merged reviewers"). The
 coordinator merges their findings (see `coordinator.md`).
 
 A project overlay can replace the risk tiers, the lens sets, the context
@@ -67,9 +68,55 @@ Both skills use these sets, unless the overlay gives its own.
 
 Add **docs** when the change alters behavior that the documentation describes.
 
-**`--delta` mode** (self-review called by /shipme): run correctness and
-catch-all, each lens that the overlay marks as always required, and each lens
-whose area the delta touches.
+## Follow-up set
+
+self-review uses this set, not the full set, for rounds 2 to 5 of a review
+(a `--delta` review too). The full set ran in round 1, and a reviewer that
+replied CLOSED to a fix has checked it. The bullets cover what that leaves
+out.
+
+- **correctness** and **catch-all**, always.
+- Each lens whose area the fixes touch. The fixes are the changes between
+  the two rounds (`git diff <T of the round before> <T of this round>`; in
+  series mode, the commit that each of the two rounds ended at), without the
+  NIT fixes. Judge the
+  area by what the fixes do, not by the files they are in. For example:
+  security when a fix changes a check on untrusted input, concurrency when
+  it touches a lock, tests when it adds a branch or changes test logic,
+  style-description when a fix changes comments or names, or when the
+  description changes in more than wording.
+- Each lens with a finding above NIT from the round before that ended
+  DISPUTED, or whose fix its reviewer did not check (a fix that the user
+  decided, or a fix for a finding with no reviewer, such as a `gate4` or
+  built-in one: use the lens that covers the finding).
+- Each lens of the full set whose reviewer has not completed a round (it
+  failed twice; `coordinator.md`, "Reviewers").
+- At the High tier, each lens that had a BLOCKER or RED FLAG in the round
+  before.
+
+Classify the tier again when the fixes change what the change touches (for
+example, a fix adds parsing of untrusted data). If the tier rises, give the
+new tier in the briefs, use it for the rules above and for an overlay's
+merged pairs, and add each lens of the new tier's full set that has not run
+yet.
+
+List the lenses left out, as for any lens not run. An overlay can change
+this set.
+
+## `--delta` mode
+
+A `--delta` review (self-review called by /shipme) covers changes made after
+the last review, which no reviewer has read. Treat the delta as a change of
+its own: classify its tier, and in round 1 start the full lens set that the
+tier table, or the overlay, gives for what the delta touches. Its later
+rounds use the follow-up set.
+
+## Merged reviewers
+
+An overlay can give two lenses to one reviewer. Pass both in the `Lens:`
+field (`Lens: <label> (<lens 1> + <lens 2>): <objective 1>; <objective
+2>`), give the reviewer the context of both lenses, and use the label in
+the ledger.
 
 ## Context per lens
 

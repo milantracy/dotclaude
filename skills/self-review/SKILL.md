@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Review the changes we made with several independent reviewer subagents that start with no context, each with one lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one, and start fresh reviewers each round until the skill's stop rule is met (at most 5 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /shipme checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
+description: Review the changes we made with several independent reviewer subagents that start with no context, each with its own lens (correctness, security, tests, design, ...), scaled to the risk of the change. The correctness reviewer first forms its own view from the problem alone (blind), then sees our reasoning and checks it. We act as coordinator. We merge findings, verify them through four gates (including running the tests with and without the change), fix or argue each one (nits are settled without arguing), and start fresh reviewers each round (a smaller set after round 1) until the skill's stop rule is met (at most 5 rounds). Asks the user to decide disputed blockers, red flags, and questions. Records an approval stamp that /shipme checks. Use when a change is done ("review my changes", "self-review", "check this before shipping"). Not for other people's PRs; use pr-review for those.
 argument-hint: "[base-ref | commit | range] [--delta <tree>] [--with-builtin]"
 ---
 
@@ -8,9 +8,10 @@ argument-hint: "[base-ref | commit | range] [--delta <tree>] [--with-builtin]"
 
 You are the **author** and the **coordinator**. You fix things or argue with
 evidence. The **reviewers** are fresh `code-reviewer` subagents that know
-nothing about this conversation, one per lens. Kit: `~/.claude/review-kit/`.
+nothing about this conversation, one per lens (or per merged pair of an
+overlay). Kit: `~/.claude/review-kit/`.
 Read these kit files first:
-- `README.md`: overlay detection.
+- `overlays.md`: overlay detection.
 - `lenses.md`: the lens catalog, risk tiers, lens sets, and context per lens.
 - `coordinator.md`: the ledger, the four gates, how to run Gate 4, and the
   rules for arguing.
@@ -24,40 +25,19 @@ Read these kit files first:
     review one commit at a time; see "Series mode" below.
   - With `--delta <tree>` (passed by /shipme): diff from that tree to the
     current working tree.
-- **Series mode** (`<sha>~1..<sha>`):
-  1. The end of each round is that commit, not a tree snapshot.
-  2. Ask the user once before the first history rewrite. Require a clean
-     working tree (or stash only with the user's consent).
-  3. Fold fixes into the commit. If it is not HEAD, stop at it first:
-     `GIT_SEQUENCE_EDITOR="sed -i -E '1s/^(pick|p) /edit /'" git rebase -i
-     <sha>~1`, then check that `git rev-parse HEAD` equals `<sha>`; if not,
-     abort the rebase.
-     Make the fixes, then amend without the user's sign-off (a plain
-     `--amend` can keep the old message silently when `GIT_EDITOR` is set):
-     ```
-     git add -u; git add -- <new files of the fix>
-     git status --porcelain    # must show only the files you meant to change
-     me="Signed-off-by: $(git config user.name) <$(git config user.email)>"
-     git log -1 --format=%B | grep -vxF "$me" | git commit --amend -F -
-     git rev-parse HEAD    # record: this is the next round's end
-     ```
-     Then `git rebase --continue` if you started a rebase. On a rebase
-     conflict, abort the rebase, give the user the recorded commit (it
-     stays in the reflog), and ask how to proceed.
-  4. This follows /shipme's "No sign-off" rule (`skills/shipme/SKILL.md`). List
-     the commit in the report as needing the user's sign-off.
-  5. The recorded commit is the next round's end (after `--continue`, HEAD
-     is the series tip, not this commit).
+- **Series mode** (`<sha>~1..<sha>`, one commit of a series): read
+  `~/.claude/skills/self-review/series.md` first. The end of each round is
+  that commit, not a tree snapshot, and you fold the fixes into it.
 - **Snapshots:** take `T=$(~/.claude/review-kit/bin/review-stamp tree)` at the
   start of each round (`T1`, `T2`, ...) and after each set of fixes (`T_next`).
   `T_prev` is the tree that the reviewer last read. Reviewers diff against tree
   hashes (`git diff <base> <T_k>`), so later edits don't shift the ground under
   them.
-- **Overlay:** detect it from the kit README. Collect absolute paths to
+- **Overlay:** detect it from `overlays.md`. Collect absolute paths to
   `projects/<name>/review.md`.
 - **Risk tier and lenses:** classify the change and pick the lens set (overlay,
-  else `lenses.md`; for `--delta`, see `lenses.md`). Write down each lens you
-  will **not** run and why; the report needs it.
+  else `lenses.md`; for `--delta`, see "`--delta` mode" in `lenses.md`).
+  Write down each lens you will **not** run and why; the report needs it.
 - **Context:** write the blind brief (section 2) from the conversation, the
   issue, and the commits. Ask the user only for parts you really can't fill in.
 - **Commit message:** if no draft exists yet, draft it now. The
@@ -68,7 +48,9 @@ Read these kit files first:
 ## 2. Round 1: parallel blind pass
 
 Spawn all reviewers in one message (Agent tool, `subagent_type:
-"code-reviewer"`, one call per lens). Each gets the base brief:
+"code-reviewer"`, one call per lens, or per merged pair of an overlay; its
+`Lens:` form is in `lenses.md`, "Merged reviewers"). Each gets the base
+brief:
 
 ```
 Repo: <abs path>
@@ -165,17 +147,23 @@ For each finding, decide honestly:
 - **REBUTTAL:** only with checkable evidence (a test that passes, a code
   reference, a source citation) that refutes the reviewer's scenario. If your
   rebuttal is "I don't think so", fix it instead.
-- **LEAVE** (MINOR or NIT only): ask the reviewer to agree that it can stay
-  for now, with your reason. If it agrees, the outcome is LEFT; if not,
+- **LEAVE** (MINOR only): ask the reviewer to agree that it can stay for
+  now, with your reason. If it agrees, the outcome is LEFT; if not,
   DISPUTED.
+- **NIT:** settle it yourself: FIXED, LEFT, or DROPPED when it fails your
+  check (`coordinator.md`). Don't send NITs to the reviewer. No reviewer
+  checks a NIT fix, so keep it to names, comments, and wording. If the fix
+  would change behavior, treat the finding as a MINOR and say so in the
+  message to its reviewer (`F3 (NIT, now MINOR) FIXED: ...`).
 
-Send each reviewer its own findings (rules in `coordinator.md`, "Arguing"):
+Send each reviewer its own findings above NIT (rules in `coordinator.md`,
+"Arguing"). A reviewer with only NITs gets no message:
 
 ```
 New diff: git diff <T_prev> <T_next>   (full: git diff <base> <T_next>)
 F1 FIXED: <what changed, where>        (the reviewer's own numbering)
 F2 REBUTTAL: <evidence>
-F3 LEAVE: <why this MINOR or NIT can stay for now>
+F3 LEAVE: <why this MINOR can stay for now>
 ```
 
 A finding that stays OPEN after the exchange limit is DISPUTED. "Escalate
@@ -186,30 +174,31 @@ performance on a hot path, say that /shipme's benchmark gate applies.
 
 ## 6. Rounds 2 to 5
 
-Start a **fresh** set of reviewers (the lens selection redone for what the
-change now touches) on the **full** diff `git diff <base> <T_k>`, with the
-same minimal context as round 1. Fresh reviewers don't anchor on the earlier
-rounds.
+Start **fresh** reviewers on the **full** diff `git diff <base> <T_k>`, with
+the same minimal context as round 1. Fresh reviewers don't anchor on the
+earlier rounds. Start only the **follow-up set** (defined in `lenses.md`,
+or the overlay's version), not the full set again.
 
 - The correctness reviewer gets the blind brief and then the reveal again,
   with the updated reasoning.
 - Don't tell reviewers about earlier findings. Exception: if the same finding
-  came up in two rounds in a row and was settled (REJECTED, DISPUTED, or LEFT),
-  add one line to that lens's brief: `Already settled: <claim>: <why>`.
+  came up in two rounds in a row and was settled (REJECTED, DISPUTED, or LEFT;
+  for a NIT, also DROPPED), add one line to that lens's brief:
+  `Already settled: <claim>: <why>`.
 - Then repeat sections 4 and 5.
 
 **Start another round when** you changed code or tests after the round's
 reviewers read them (not counting NIT fixes), or when a new finding above NIT
 ended DISPUTED. Findings that repeat settled ones, NITs, and free-range
-proposals don't count. Otherwise stop, and list open MINOR and NIT findings for
-the user.
+proposals don't count. Otherwise stop, and list the DISPUTED and LEFT findings
+for the user.
 
 **Cap:** 5 rounds. If round 5 still leads to code or test changes, stop and
 ask the user how to proceed.
 
 ## 7. Escalate disagreements
 
-List disputed MINOR and NIT findings in the report. Ask the user about each
+List disputed MINOR findings in the report. Ask the user about each
 disputed BLOCKER, RED FLAG, or QUESTION with AskUserQuestion, one question per
 finding, each standing on its own:
 - The finding (file:line, scenario).
@@ -236,15 +225,15 @@ say in the report that the decided fix had no fresh review.
     reviewers that failed twice and declined free-range proposals).
   - Root cause: matched, or differed and how it was resolved.
   - Ledger, by outcome (`coordinator.md`):
-    - FIXED, and why.
+    - FIXED, and why. Mark the NIT fixes: no reviewer checked them.
     - REJECTED (the reviewer agreed), and why.
     - DISPUTED BLOCKER, RED FLAG, and QUESTION findings, and how the user
       decided.
-    - DISPUTED or LEFT MINOR and NIT findings.
-    - DROPPED built-in findings, with the reason.
+    - DISPUTED MINOR findings, and LEFT MINOR and NIT findings.
+    - DROPPED built-in findings and NITs, with the reason.
   - Gate 4 and other tests run, with their results.
   - The final commit message / PR description draft (after reviewer fixes).
   - Next step: `/shipme`.
 
 Don't create new commits or push. That is /shipme's job. The one exception is
-series mode, where you amend the commit under review (section 1).
+series mode, where you amend the commit under review (`series.md`).

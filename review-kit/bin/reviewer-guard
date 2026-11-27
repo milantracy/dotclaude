@@ -5,8 +5,8 @@ OS sandbox (sandbox-exec on macOS, bwrap on Linux).
 The hook reads the hook input (JSON) on stdin and rewrites the command
 (hookSpecificOutput.updatedInput) to `/usr/bin/env -i <vars> <sandbox>
 $SHELL -c <cmd>`. The sandbox can write only to the reviewer's scratch
-directory (TMPDIR) and has no network; see "bin/reviewer-guard" in
-review-kit/README.md for the full list and the limits.
+directory (TMPDIR) and has no network; see
+review-kit/bin/README.md for the full list and the limits.
 
 A command that is byte for byte this hook's own wrapper (a reissue in auto
 mode) passes through unchanged; anything else is wrapped. If no sandbox is

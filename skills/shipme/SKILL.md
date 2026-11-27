@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Shipme
 
-Kit: `~/.claude/review-kit/`. Detect the overlay from its `README.md` and read
+Kit: `~/.claude/review-kit/`. Detect the overlay from its `overlays.md` and read
 `projects/<name>/ship.md` when one exists. The overlay overrides the defaults
 below.
 
