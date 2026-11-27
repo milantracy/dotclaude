@@ -1,8 +1,10 @@
 # Coordinator rules
 
-The self-review and pr-review skills both use these rules. The main session is
-the coordinator. It starts the reviewers, merges their findings, verifies them,
-and argues with the reviewers. Each skill states only how it differs.
+The self-review and pr-review skills both use these rules. The session that
+runs the skill is the coordinator: the main session for self-review, a forked
+background subagent for pr-review. It starts the reviewers, merges their
+findings, verifies them, and argues with the reviewers. Each skill states only
+how it differs.
 
 ## Reviewers
 
@@ -114,9 +116,7 @@ Targets:
 
 - **Worktree:** `create` on the first run; the report gives `$W`. Pass that
   path in later rounds, so they reuse the build output. pr-review gives its
-  head worktree as `given <path>` (the reviewers read it too). If that
-  worktree is at the wrong commit (pr-review after a force-push), move it
-  to `<end>` first with `git -C <path> checkout --detach --force <end>`.
+  head worktree as `given <path>` (the reviewers read it too).
 - **Plan problems:** the report lists them (a failed revert, a missing
   target, mixed test and production hunks it couldn't split, an unrelated
   failure). Fix the plan (for example with `Revert hunks:`, which can name
@@ -158,8 +158,8 @@ The agent defines what each verdict means. Map them to the ledger:
 
 ## Arguing
 
-- Send each reviewer only its own findings, with SendMessage, with your
-  evidence or the fix.
+- Send each reviewer only its own findings, with SendMessage (load it with
+  ToolSearch `select:SendMessage` if needed), with your evidence or the fix.
 - A finding from a reviewer subagent is rejected only when its reviewer
   agrees (CLOSED).
 - Argue at most three exchanges per finding. If the finding is still OPEN, the

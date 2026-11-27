@@ -1,7 +1,9 @@
 ---
 name: pr-review
-description: Review someone else's PR and write a markdown report with a verdict, ranked findings, and draft review comments. Starts several independent code-reviewer subagents in parallel, one per lens (scaled to the PR's risk tier), with the project overlay; merges and verifies their findings through four gates (including running the tests with and without the change), skips feedback already on the PR, and tracks earlier reviews of the same PR. Use for "review PR 14905" or "re-review after the force-push". For our own changes, use self-review.
-argument-hint: "<PR number | URL> [--post]"
+description: Review someone else's PR and write a markdown report with a verdict, ranked findings, and draft review comments. Starts several independent code-reviewer subagents in parallel, one per lens (scaled to the PR's risk tier), with the project overlay; merges and verifies their findings through four gates (including running the tests with and without the change), skips feedback already on the PR, and tracks earlier reviews of the same PR. Run it as `/pr-review 14905`, and again after a force-push. For our own changes, use self-review.
+argument-hint: "<PR number | URL>"
+context: fork
+disable-model-invocation: true
 ---
 
 # PR review (external)
@@ -17,9 +19,19 @@ files first:
 The review method is in the `code-reviewer` agent. Overlays are in
 `review-kit/projects/<name>/review.md`.
 
+This skill runs forked, in the background: you see no conversation history,
+and you can't ask the user anything. The PR is in the arguments; if they
+don't name exactly one PR (a number or URL), stop and say so as your final
+message. If the arguments include `--post`, ignore it (this skill never
+posts) and say so in your final message. If you have no Agent tool, stop
+and say so: the review needs its reviewers. Where the kit says to ask the
+user (for example, a reviewer that asks for a benchmark), add the question
+to the report's Open questions section instead.
+
 ## 1. Resolve the PR
 
 - `gh pr view <n> --json title,body,author,baseRefName,headRefOid,files,commits,comments,reviews`
+  Note the time you ran it (`date -u`): the report's Head read line.
 - Base commit: `gh api repos/<owner>/<repo>/pulls/<n> --jq .base.sha`
   (`baseRefOid` isn't a `--json` field in older gh versions).
 - Inline review threads, with their resolved state, aren't in that output.
@@ -33,9 +45,19 @@ The review method is in the `code-reviewer` agent. Overlays are in
 - Fetch the head and the base commit from the PR's repository, not
   necessarily `origin` (which can be a fork):
   `git fetch https://github.com/<owner>/<repo> <base sha> pull/<n>/head`.
-  Add a worktree for the head (`git worktree add --detach <path>
-  <headRefOid>`; `FETCH_HEAD` points at the base here), so builds and tests
-  don't disturb the user's checkout.
+  Add a worktree for the head at a new path, so builds and tests don't
+  disturb the user's checkout and another review can't use the same one:
+  - In one Bash call:
+    `W=$(mktemp -d $(cd /tmp && pwd -P)/pr-<n>-XXXXXX) && git worktree add
+    --detach $W <headRefOid> && echo $W`. Use `<headRefOid>`, not
+    `FETCH_HEAD`, which points at the base here. `pwd -P` resolves the /tmp
+    symlink (/private/tmp on macOS), so the path matches what `git
+    worktree list` prints.
+  - Shell state doesn't persist: use the printed path literally from then
+    on.
+  - List other `pr-<n>-` worktrees in that directory (from `git worktree
+    list`) under Open questions: a run that died leaves its worktree
+    behind. Don't remove them; another review may still be using one.
 - **Base:** `git merge-base <base sha> <headRefOid>`, never the base branch
   tip. The tip diff also contains every base-branch change since the fork.
 - Detect the overlay (kit README).
@@ -49,16 +71,20 @@ claims a fix ("Done", or resolved with no explanation) while its cited lines
 have no real fix is a BLOCKER. A *why* or *how* question needs a technical
 answer, not a bare "Done".
 
-**Our earlier reports** (overlay location; default
-`~/workspace/reviews/pr-<n>*.md`). If one exists:
+**Our earlier reports** (`pr-<n>.md` and `pr-<n>-rev*.md` in the overlay's
+report directory, default `~/workspace/reviews/`, plus any older location
+the overlay names). Skip a file that holds only the in-progress line (step
+5): another run is writing it, or died while it did. If a real report
+exists, compare against the one whose run read the PR head last (its
+`Head read` time; highest rev on a tie, and a report without that line
+counts as older), since two runs that overlap a force-push can finish in
+either order:
 - Run `git range-diff` between the old head and the new head (`git diff` for
   added commits).
 - Re-check each earlier finding yourself, at every severity: fixed, partly
   fixed, not addressed, declined with a sound technical reason, or no longer
   applies. Never drop an unresolved one silently. Don't give them to the
   reviewers (`coordinator.md`, "Reviewers").
-- Write the new report as `pr-<n>-rev<k>.md`. Never overwrite an earlier
-  report.
 
 ## 3. Run the reviewers
 
@@ -93,16 +119,26 @@ Also:
   If a finding looks wrong, unclear, or conflicts with another reviewer's,
   argue with its reviewer. A finding that the reviewer agrees doesn't hold is
   REJECTED.
-  Report a DISPUTED finding (still open after the exchange limit) as a
-  question in the report.
+  Report a DISPUTED finding (still open after the exchange limit) under
+  Open questions, and nowhere else in the report.
 
 ## 5. Write the report
 
-Save it to the overlay's report directory (default `~/workspace/reviews/`):
+Save it to the overlay's report directory (default `~/workspace/reviews/`).
+**Name:** `pr-<n>.md` is rev 1, then `pr-<n>-rev2.md`, `-rev3.md`, and so
+on; never overwrite a report. Another review of the same PR may be writing
+one, so reserve the next free name right before you write, in one Bash
+call that fails if the file exists:
+`mkdir -p <dir> && (set -C; echo '<!-- in progress -->' > <dir>/<name>)`.
+If it fails and the file exists, the name is taken: take the next rev. Any
+other failure is a real error. Use that rev in the header, then Read the
+file and Write the report into it (the Write tool requires the Read).
+
+Layout:
 
 ```
 # Review: <repo>#<n> (rev k) — <title>
-PR head `<sha>` (<author>). Base `<merge-base sha>`. <files>, +A/−D.
+PR head `<sha>` (<author>). Head read <time>. Base `<merge-base sha>`. <files>, +A/−D.
 Risk tier: <Low/Medium/High>. Lenses: <run>; not run: <lens: why>.
 Earlier review: <path or "none">.
 Build/test: <command> — <result>. Gate 4: <targets, with/without results>.
@@ -110,14 +146,22 @@ Build/test: <command> — <result>. Gate 4: <targets, with/without results>.
 ## Contents
 ## 1. Verdict          Approve / Approve with nits / Request changes, in 1–3 short paragraphs.
                        What to land as-is and what blocks.
-## 2. What changed since rev k-1   (re-reviews only; table of earlier findings → status)
+## 2. What changed since rev j     (re-reviews only: the report you compared against;
+                                   table of its findings → status)
 ## 3. Context          Only what a reader needs to follow the findings.
 ## N. BLOCKER k: <claim as a sentence>
 ## N. Red flag: <claim>
 ## N. Minor: <claim>
 ## N. Tests
 ## N. Nits
-## N. Review comments  Draft top-level comment, then one draft comment per finding.
+## N. Open questions   For the user: DISPUTED findings, benchmark requests,
+                       anything the kit would have asked. Omit when empty.
+## N. Review comments  First how to post: check that the PR head still equals
+                       `<sha>` (if it moved, don't post; re-run /pr-review),
+                       anchor the inline comments on it, show the user the
+                       comments, and post only after the user confirms. Then
+                       the draft top-level comment, and one draft comment per
+                       finding.
 ## N. File/line index  Every file:line referenced, linked to its finding.
 ```
 
@@ -136,7 +180,10 @@ and the lens(es) that found it.
 
 ## 6. Finish
 
-Tell the user the verdict, the blocker titles, and the report path. Post to
-GitHub only with `--post` or an explicit request. Show the comments first and
-post only after the user confirms. Remove the worktree when done (run the
-overlay's worktree cleanup first), unless the user wants to keep it.
+Remove the head worktree (run the overlay's worktree cleanup first), and
+do the same when you stop early, along with any reservation you made.
+Never post to GitHub.
+
+End with a short message, since it is all the main session sees: the
+verdict, the blocker titles, the open questions, the report path, and a
+note that the report's Review comments section says how to post them.
